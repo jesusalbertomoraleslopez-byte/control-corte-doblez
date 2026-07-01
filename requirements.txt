@@ -4,3 +4,6 @@ openpyxl
 plotly
 fpdf2
 python-docx
+streamlit-aggrid
+reportlab
+pillow
