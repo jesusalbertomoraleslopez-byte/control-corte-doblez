@@ -1,0 +1,22 @@
+# Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Databases
+*.db
+sigrama.db
+
+# Streamlit local config (optional, but good to avoid credentials)
+.streamlit/secrets.toml
+
+# OS files
+.DS_Store
+Thumbs.db
