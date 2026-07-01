@@ -127,4 +127,4 @@ def view_manual():
             type="primary"
         )
     else:
-        st.error("⚠️ El archivo PDF del manual no está disponible en los recursos del sistema. Por favor, súbelo a través del menú 'Personalizar Recursos' en el panel lateral.")
+        st.error("⚠️ El archivo PDF del manual no está disponible en este momento. Por favor, contacta al administrador del sistema.")

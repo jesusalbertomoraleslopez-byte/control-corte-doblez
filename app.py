@@ -159,39 +159,7 @@ def main():
         import os
         banner_path = os.path.join(os.path.dirname(__file__), "assets", "banner.png")
         
-        # Opcion para subir imagenes y recursos en el sidebar
-        with st.sidebar.expander("🖼️ Personalizar Recursos"):
-            uploaded_logo = st.file_uploader("Logo (Superior Izquierda)", type=['png', 'jpg', 'jpeg'], key='logo_up')
-            if uploaded_logo is not None:
-                os.makedirs(os.path.dirname(banner_path), exist_ok=True)
-                with open(os.path.join(os.path.dirname(__file__), "assets", "logo.png"), "wb") as f:
-                    f.write(uploaded_logo.getbuffer())
-                st.success("Logo actualizado!")
-                st.rerun()
- 
-            uploaded_banner = st.file_uploader("Banner (Principal)", type=['png', 'jpg', 'jpeg'], key='banner_up')
-            if uploaded_banner is not None:
-                os.makedirs(os.path.dirname(banner_path), exist_ok=True)
-                with open(banner_path, "wb") as f:
-                    f.write(uploaded_banner.getbuffer())
-                st.success("Banner actualizado!")
-                st.rerun()
-                
-            uploaded_slogan = st.file_uploader("Slogan (Inferior Izquierda)", type=['png', 'jpg', 'jpeg'], key='slogan_up')
-            if uploaded_slogan is not None:
-                os.makedirs(os.path.dirname(banner_path), exist_ok=True)
-                with open(os.path.join(os.path.dirname(__file__), "assets", "slogan.png"), "wb") as f:
-                    f.write(uploaded_slogan.getbuffer())
-                st.success("Slogan actualizado!")
-                st.rerun()
-
-            uploaded_manual = st.file_uploader("Manual de Usuario (PDF)", type=['pdf'], key='manual_up')
-            if uploaded_manual is not None:
-                os.makedirs(os.path.dirname(banner_path), exist_ok=True)
-                with open(os.path.join(os.path.dirname(__file__), "assets", "Manual_Sistema.pdf"), "wb") as f:
-                    f.write(uploaded_manual.getbuffer())
-                st.success("Manual de usuario actualizado!")
-                st.rerun()
+        # Fin de configuracion lateral (se elimino la opcion de personalizar recursos)
         if os.path.exists(banner_path):
             st.image(banner_path, use_container_width=True)
         else:
