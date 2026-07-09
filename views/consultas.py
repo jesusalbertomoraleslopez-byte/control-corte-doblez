@@ -207,38 +207,130 @@ def view_consultas():
         st.subheader("Análisis de Scrap y Rechazos")
         
         query_calidad = """
-        SELECT of_number as OF, nido as Nido, no_pieza as Pieza, area as Área, 
-               cantidad as Cantidad, motivo as Motivo, operador as Operador, timestamp as Fecha_Hora
-        FROM rechazos
-        ORDER BY timestamp DESC
+        SELECT r.of_number as OF, r.nido as Nido, r.no_pieza as Pieza, r.area as Área, 
+               r.cantidad as Cantidad, r.motivo as Motivo, r.operador as Operador, 
+               r.maquina as Máquina, r.timestamp as Fecha_Hora, p.nombre_pieza as Descripción
+        FROM rechazos r
+        LEFT JOIN piezas p ON r.of_number = p.of_number AND r.nido = p.nido AND r.no_pieza = p.no_pieza
+        ORDER BY r.timestamp DESC
         """
         df_calidad = fetch_data(query_calidad)
         
         if df_calidad.empty:
             st.success("¡Excelentes noticias! No hay registros de piezas rechazadas.")
         else:
-            col_chart1, col_chart2 = st.columns(2)
+            # 1. Scrap Global
+            total_scrap = df_calidad['Cantidad'].sum()
             
+            st.markdown(
+                f'''
+                <div style="background-color: #fff0f0; border-top: 5px solid #dc3545; padding: 20px; border-radius: 8px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center;">
+                    <p style="margin: 0; font-size: 1.2rem; color: #666; font-weight: bold; text-transform: uppercase;">📉 TOTAL DE SCRAP GENERADO (GLOBAL)</p>
+                    <div style="margin: 5px 0 0 0; font-size: 4.5rem; font-weight: 900; color: #dc3545;">{total_scrap} <span style="font-size: 1.8rem; font-weight: bold; color: #555;">piezas</span></div>
+                </div>
+                ''', unsafe_allow_html=True
+            )
+            
+            # 2. Separar por área
+            st.markdown("### 🗂️ Scrap Registrado por Área")
+            areas_list = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+            cols = st.columns(4)
+            
+            process_icons = {
+                "Corte": "✂️",
+                "Rebabeo": "⚙️",
+                "Doblez": "📐",
+                "Barrenado": "🔩",
+                "Pintura": "🎨",
+                "Liberado": "✅",
+                "Empaque": "📦"
+            }
+            
+            friendly_names = {
+                "Corte": "Corte Láser",
+                "Rebabeo": "Rebabeo / Lijado",
+                "Doblez": "Doblez",
+                "Barrenado": "Barrenado",
+                "Pintura": "Pintura",
+                "Liberado": "Liberado / Calidad",
+                "Empaque": "Empaque / Embarque"
+            }
+            
+            df_areas = df_calidad.groupby('Área')['Cantidad'].sum().to_dict()
+            
+            for idx, area in enumerate(areas_list):
+                scrap_val = df_areas.get(area, 0)
+                color = "#dc3545" if scrap_val > 0 else "#28a745"
+                icon = process_icons.get(area, "🏭")
+                pct = (scrap_val / total_scrap * 100) if total_scrap > 0 else 0
+                label = friendly_names.get(area, area)
+                
+                with cols[idx % 4]:
+                    st.markdown(
+                        f'''
+                        <div style="background-color: #f8f9fa; border-top: 5px solid {color}; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative;">
+                            <div style="position: absolute; top: 5px; right: 5px; background-color: #f1f3f5; color: #495057; padding: 2px 6px; border-radius: 10px; font-size: 0.75rem; font-weight: bold;">{pct:.1f}%</div>
+                            <div style="font-size: 1.8rem; margin-bottom: 3px;">{icon}</div>
+                            <p style="margin: 0; font-size: 0.85rem; color: #555; font-weight: bold; text-transform: uppercase;">{label}</p>
+                            <h3 style="margin: 5px 0 0 0; font-size: 2.2rem; font-weight: 900; color: {color};">{scrap_val}</h3>
+                        </div>
+                        ''', unsafe_allow_html=True
+                    )
+            
+            # 3. Detalle de piezas por área
+            st.markdown("### 🔍 Detalle de Piezas en Scrap por Área")
+            sel_area_scrap = st.selectbox(
+                "Selecciona un área para ver el detalle de piezas en Scrap:",
+                ["Selecciona un área..."] + [friendly_names[a] for a in areas_list],
+                key="sel_area_scrap"
+            )
+            
+            if sel_area_scrap != "Selecciona un área...":
+                inv_friendly = {v: k for k, v in friendly_names.items()}
+                tec_area = inv_friendly[sel_area_scrap]
+                
+                df_area_scrap = df_calidad[df_calidad['Área'] == tec_area].copy()
+                
+                if df_area_scrap.empty:
+                    st.success(f"✅ ¡No hay registros de Scrap en el área de **{sel_area_scrap}**!")
+                else:
+                    cols_show = ["OF", "Nido", "Pieza", "Descripción", "Cantidad", "Motivo", "Operador", "Máquina", "Fecha_Hora"]
+                    df_area_scrap = df_area_scrap[[c for c in cols_show if c in df_area_scrap.columns]]
+                    st.dataframe(df_area_scrap, use_container_width=True, hide_index=True)
+                    
+                    csv_area_scrap = convert_df(df_area_scrap)
+                    st.download_button(
+                        label=f"📥 Descargar Detalle de Scrap - {sel_area_scrap} (CSV)",
+                        data=csv_area_scrap,
+                        file_name=f"Scrap_{tec_area}.csv",
+                        mime='text/csv',
+                        use_container_width=True,
+                        type="primary"
+                    )
+                    
+            st.markdown("---")
+            st.markdown("### 📊 Gráficas de Análisis Global")
+            
+            col_chart1, col_chart2 = st.columns(2)
             with col_chart1:
-                # Grafica por motivo
                 df_motivos = df_calidad.groupby('Motivo')['Cantidad'].sum().reset_index()
-                fig_mot = px.pie(df_motivos, values='Cantidad', names='Motivo', title='Rechazos por Motivo', hole=0.4)
+                fig_mot = px.pie(df_motivos, values='Cantidad', names='Motivo', title='Distribución de Motivos de Rechazo', hole=0.4)
                 st.plotly_chart(fig_mot, use_container_width=True)
                 
             with col_chart2:
-                # Grafica por area
-                df_areas = df_calidad.groupby('Área')['Cantidad'].sum().reset_index()
-                fig_ar = px.bar(df_areas, x='Área', y='Cantidad', title='Rechazos por Área', text='Cantidad')
+                df_areas_g = df_calidad.groupby('Área')['Cantidad'].sum().reset_index()
+                df_areas_g['Área'] = df_areas_g['Área'].map(friendly_names)
+                fig_ar = px.bar(df_areas_g, x='Área', y='Cantidad', title='Piezas en Scrap por Área', text='Cantidad', color='Cantidad', color_continuous_scale="Reds")
                 fig_ar.update_traces(textposition='outside')
                 st.plotly_chart(fig_ar, use_container_width=True)
                 
-            st.markdown("#### Detalle de Piezas Rechazadas")
+            st.markdown("#### 📋 Historial Completo de Rechazos (Global)")
             st.dataframe(df_calidad, use_container_width=True)
             csv_cal = convert_df(df_calidad)
             st.download_button(
-                label="📥 Descargar Reporte de Rechazos (CSV)",
+                label="📥 Descargar Historial Global de Rechazos (CSV)",
                 data=csv_cal,
-                file_name='rechazos.csv',
+                file_name='rechazos_global.csv',
                 mime='text/csv',
             )
 
