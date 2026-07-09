@@ -135,42 +135,105 @@ def view_avances():
             """, unsafe_allow_html=True
         )
         
-        st.markdown("👇 **Selecciona un Nido de la tabla haciendo clic en la fila correspondiente:**")
+        # Toggle para cambiar a modo reposición
+        modo_reposicion = st.checkbox("🔄 Registrar Reposiciones / Re-cuts (Piezas sueltas re-cortadas por Scrap)", key="corte_modo_reposicion")
         
-        # Obtener el estado de los nidos para esta área
-        conn = get_connection()
-        c = conn.cursor()
-        if of_number == "Todas":
-            c.execute("SELECT DISTINCT of_number || '-' || nido FROM avances WHERE area = ?", (area_seleccionada,))
-            terminados = [row[0] for row in c.fetchall()]
-            nidos_list_unique = (df_todas['of_number'] + ' | ' + df_todas['nido']).unique().tolist()
-            df_nidos_list = pd.DataFrame({"Nido": nidos_list_unique})
-            # Adjust terminados to match format
-            df_nidos_list["Estado"] = df_nidos_list["Nido"].apply(
-                lambda x: "✅ Terminado" if x.replace(" | ", "-") in terminados else "⏳ Pendiente"
+        if modo_reposicion:
+            st.markdown("### 📋 Registro de Reposición de Piezas en Corte")
+            st.markdown("👇 **Ingresa la cantidad de piezas que re-cortaste para reponer Scrap:**")
+            
+            # Agrupar piezas por número de pieza
+            df_plan_piezas = df_todas.copy()
+            df_plan_piezas['hojas'] = pd.to_numeric(df_plan_piezas['hojas'], errors='coerce').fillna(1).astype(int)
+            df_plan_piezas['cantidad'] = pd.to_numeric(df_plan_piezas['cantidad'], errors='coerce').fillna(0).astype(int)
+            df_plan_piezas['req_total'] = df_plan_piezas['cantidad'] * df_plan_piezas['hojas']
+            
+            df_piezas_corte = df_plan_piezas.groupby(['no_pieza']).agg({
+                'nombre_pieza': 'first',
+                'req_total': 'sum'
+            }).reset_index()
+            
+            # Consultar avances y rechazos en Corte
+            conn = get_connection()
+            if of_number == "Todas":
+                df_av_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as cortadas FROM avances WHERE area='Corte' GROUP BY no_pieza", conn)
+                df_re_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as rechazadas FROM rechazos WHERE area='Corte' GROUP BY no_pieza", conn)
+            else:
+                df_av_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as cortadas FROM avances WHERE of_number=? AND area='Corte' GROUP BY no_pieza", conn, params=(of_number,))
+                df_re_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as rechazadas FROM rechazos WHERE of_number=? AND area='Corte' GROUP BY no_pieza", conn, params=(of_number,))
+            conn.close()
+            
+            df_piezas_corte = df_piezas_corte.merge(df_av_c, on='no_pieza', how='left')
+            df_piezas_corte = df_piezas_corte.merge(df_re_c, on='no_pieza', how='left')
+            df_piezas_corte['cortadas'] = df_piezas_corte['cortadas'].fillna(0).astype(int)
+            df_piezas_corte['rechazadas'] = df_piezas_corte['rechazadas'].fillna(0).astype(int)
+            df_piezas_corte['Re-cuts / Reposición'] = 0
+            
+            df_rep_edit = st.data_editor(
+                df_piezas_corte[['no_pieza', 'nombre_pieza', 'req_total', 'cortadas', 'rechazadas', 'Re-cuts / Reposición']],
+                column_config={
+                    "no_pieza": st.column_config.TextColumn("No. Parte", disabled=True),
+                    "nombre_pieza": st.column_config.TextColumn("Descripción", disabled=True),
+                    "req_total": st.column_config.NumberColumn("Planeadas", disabled=True),
+                    "cortadas": st.column_config.NumberColumn("Cortadas", disabled=True),
+                    "rechazadas": st.column_config.NumberColumn("Rechazadas (Scrap)", disabled=True),
+                    "Re-cuts / Reposición": st.column_config.NumberColumn("Cantidad a Reponer", min_value=0, step=1, disabled=False)
+                },
+                use_container_width=True,
+                hide_index=True,
+                key="editor_corte_reposiciones"
             )
+            
+            if st.button("✅ Registrar Reposiciones en Corte", type="primary", use_container_width=True):
+                if not operador.strip():
+                    st.error("⚠️ Por favor selecciona un Operador válido antes de guardar.")
+                    st.stop()
+                    
+                df_to_save = df_rep_edit[df_rep_edit['Re-cuts / Reposición'] > 0].copy()
+                if df_to_save.empty:
+                    st.warning("⚠️ No has capturado ninguna cantidad de reposición.")
+                else:
+                    df_to_save['Terminadas'] = df_to_save['Re-cuts / Reposición']
+                    # Guardar avance en Corte con nido='REPOSICION' y hoja=None
+                    save_avances_mixto(of_number, "REPOSICION", "Corte", False, df_to_save, None, operador, maquina, None)
+                    st.success("🎉 ¡Reposiciones registradas exitosamente en Corte!")
+                    st.rerun()
         else:
-            c.execute("SELECT DISTINCT nido FROM avances WHERE of_number = ? AND area = ?", (of_number, area_seleccionada))
-            terminados = [row[0] for row in c.fetchall()]
-            df_nidos_list = pd.DataFrame({"Nido": nidos_list})
-            df_nidos_list["Estado"] = df_nidos_list["Nido"].apply(
-                lambda x: "✅ Terminado" if x in terminados else "⏳ Pendiente"
+            st.markdown("👇 **Selecciona un Nido de la tabla haciendo clic en la fila correspondiente:**")
+            
+            # Obtener el estado de los nidos para esta área
+            conn = get_connection()
+            c = conn.cursor()
+            if of_number == "Todas":
+                c.execute("SELECT DISTINCT of_number || '-' || nido FROM avances WHERE area = ?", (area_seleccionada,))
+                terminados = [row[0] for row in c.fetchall()]
+                nidos_list_unique = (df_todas['of_number'] + ' | ' + df_todas['nido']).unique().tolist()
+                df_nidos_list = pd.DataFrame({"Nido": nidos_list_unique})
+                df_nidos_list["Estado"] = df_nidos_list["Nido"].apply(
+                    lambda x: "✅ Terminado" if x.replace(" | ", "-") in terminados else "⏳ Pendiente"
+                )
+            else:
+                c.execute("SELECT DISTINCT nido FROM avances WHERE of_number = ? AND area = ?", (of_number, area_seleccionada))
+                terminados = [row[0] for row in c.fetchall()]
+                df_nidos_list = pd.DataFrame({"Nido": nidos_list})
+                df_nidos_list["Estado"] = df_nidos_list["Nido"].apply(
+                    lambda x: "✅ Terminado" if x in terminados else "⏳ Pendiente"
+                )
+            conn.close()
+            
+            event = st.dataframe(
+                df_nidos_list,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="nido_selector",
+                height=200
             )
-        conn.close()
-        
-        event = st.dataframe(
-            df_nidos_list,
-            use_container_width=True,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row",
-            key="nido_selector",
-            height=200
-        )
-        
-        selected_rows = event.selection.rows
-        if selected_rows:
-            nido_seleccionado = df_nidos_list.iloc[selected_rows[0]]['Nido']
+            
+            selected_rows = event.selection.rows
+            if selected_rows:
+                nido_seleccionado = df_nidos_list.iloc[selected_rows[0]]['Nido']
 
     if is_ingenieria:
         st.markdown(f"### 📋 Números de Parte de la OF: **{of_number}**")
