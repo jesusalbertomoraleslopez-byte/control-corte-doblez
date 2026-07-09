@@ -211,6 +211,57 @@ def get_wip_pieces_detail(of_list, area):
     df_res['Cantidad WIP'] = df_res['Cantidad WIP'].astype(int)
     return df_res
 
+def style_excel_sheet(writer, df, sheet_name):
+    workbook = writer.book
+    worksheet = writer.sheets[sheet_name]
+    
+    header_format = workbook.add_format({
+        'bold': True,
+        'text_wrap': True,
+        'valign': 'vcenter',
+        'align': 'center',
+        'fg_color': '#EC2024', # Rojo SIGRAMA
+        'font_color': '#FFFFFF', # Blanco
+        'font_name': 'Arial',
+        'font_size': 10,
+        'border': 1,
+        'border_color': '#B0B0B0'
+    })
+    
+    cell_format = workbook.add_format({
+        'font_name': 'Arial',
+        'font_size': 9,
+        'border': 1,
+        'border_color': '#D3D3D3',
+        'valign': 'vcenter'
+    })
+    
+    number_format = workbook.add_format({
+        'font_name': 'Arial',
+        'font_size': 9,
+        'border': 1,
+        'border_color': '#D3D3D3',
+        'valign': 'vcenter',
+        'align': 'right'
+    })
+    
+    worksheet.hide_gridlines(2) # 2 = show on screen and when printing
+    
+    for col_num, col_name in enumerate(df.columns):
+        worksheet.write(0, col_num, str(col_name), header_format)
+        
+        # Calcular ancho
+        col_data = df[col_name].dropna()
+        max_len = max(
+            col_data.astype(str).map(len).max() if not col_data.empty else 0,
+            len(str(col_name))
+        ) + 4
+        max_len = min(50, max(12, max_len))
+        
+        is_num = pd.api.types.is_numeric_dtype(df[col_name])
+        fmt = number_format if is_num else cell_format
+        worksheet.set_column(col_num, col_num, max_len, fmt)
+
 def view_reportes():
     st.markdown("## 📊 Dashboard de Reportes y WIP Global")
     
@@ -378,19 +429,52 @@ def view_reportes():
                 df_rech = pd.read_sql_query(f"SELECT id, of_number, nido, no_pieza, area, cantidad, motivo, operador, maquina, timestamp FROM rechazos WHERE of_number IN ({placeholders}) ORDER BY timestamp DESC", conn, params=list(ofs))
             conn.close()
             
+            # Renombrar columnas
+            rename_av = {
+                "id": "ID Transacción",
+                "of_number": "OF",
+                "nido": "Nido / Nesteo",
+                "no_pieza": "No. Parte",
+                "area": "Área / Proceso",
+                "cantidad": "Cantidad",
+                "operador": "Operador",
+                "maquina": "Máquina",
+                "timestamp": "Fecha / Hora"
+            }
+            rename_rech = {
+                "id": "ID Transacción",
+                "of_number": "OF",
+                "nido": "Nido / Nesteo",
+                "no_pieza": "No. Parte",
+                "area": "Área / Proceso",
+                "cantidad": "Cantidad Rechazada",
+                "motivo": "Motivo de Scrap",
+                "operador": "Operador",
+                "maquina": "Máquina",
+                "timestamp": "Fecha / Hora"
+            }
+            
+            if not df_av.empty:
+                df_av = df_av.rename(columns=rename_av)
+            if not df_rech.empty:
+                df_rech = df_rech.rename(columns=rename_rech)
+                
+            df_resumen = pd.DataFrame({
+                "Área / Proceso": [friendly_names.get(p, p) for p in relevant_procs],
+                "Piezas en WIP": [wip_data.get(p, 0) for p in relevant_procs]
+            })
+            
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 if not df_av.empty:
                     df_av.to_excel(writer, sheet_name='Avances Detallados', index=False)
+                    style_excel_sheet(writer, df_av, 'Avances Detallados')
                 if not df_rech.empty:
                     df_rech.to_excel(writer, sheet_name='Rechazos', index=False)
+                    style_excel_sheet(writer, df_rech, 'Rechazos')
                 
-                # Crear hoja de resumen WIP
-                df_resumen = pd.DataFrame({
-                    "Área": relevant_procs,
-                    "WIP Disponible": [wip_data.get(p, 0) for p in relevant_procs]
-                })
                 df_resumen.to_excel(writer, sheet_name='Resumen WIP', index=False)
+                style_excel_sheet(writer, df_resumen, 'Resumen WIP')
                 
             return output.getvalue()
             
@@ -406,7 +490,6 @@ def view_reportes():
                 for area in relevant_procs:
                     df_area = get_wip_pieces_detail(ofs, area)
                     if not df_area.empty:
-                        # Unir con metadatos de las órdenes
                         df_area = df_area.merge(df_meta, left_on='OF', right_on='of_number', how='left')
                         if 'of_number' in df_area.columns:
                             df_area.drop(columns=['of_number'], inplace=True)
@@ -418,7 +501,8 @@ def view_reportes():
                             'prioridad': 'Prioridad',
                             'calibre': 'Calibre OF',
                             'proyecto_cliente': 'Proyecto Cliente',
-                            'descripcion_pronest': 'Descripción Pronest'
+                            'descripcion_pronest': 'Descripción Pronest',
+                            'fecha_carga': 'Fecha Carga'
                         }
                         df_area.rename(columns=rename_map, inplace=True)
                         cols_first = ['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'Fecha Producción']
@@ -426,9 +510,17 @@ def view_reportes():
                         cols_first = [c for c in cols_first if c in df_area.columns]
                         df_area = df_area[cols_first + cols_other]
                     else:
-                        df_area = pd.DataFrame(columns=['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'No. Pieza', 'Descripción', 'Cantidad WIP'])
+                        df_area = pd.DataFrame(columns=['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'No. Parte', 'Descripción', 'Cantidad WIP'])
+                    
+                    df_area.rename(columns={
+                        'no_pieza': 'No. Parte',
+                        'nombre_pieza': 'Descripción',
+                        'cantidad_wip': 'Cantidad WIP',
+                        'pendiente_disp': 'Cantidad WIP'
+                    }, inplace=True)
                     
                     df_area.to_excel(writer, sheet_name=area, index=False)
+                    style_excel_sheet(writer, df_area, area)
             return output.getvalue()
 
         excel_data = get_excel_report(of_list)
