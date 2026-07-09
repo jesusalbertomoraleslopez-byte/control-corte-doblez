@@ -77,53 +77,84 @@ def view_mantenimiento():
     if df_ofs.empty:
         st.info("ℹ️ No hay Órdenes de Fabricación en la base de datos para modificar.")
     else:
-        of_list = df_ofs["of_number"].tolist()
-        selected_of_mod = st.selectbox("Selecciona OF a modificar", of_list, key="of_mod_selector")
+        # Renombrar columnas para mostrar nombres bonitos y profesionales
+        rename_map = {
+            "of_number": "OF",
+            "proyecto": "Proyecto",
+            "fecha": "Fecha de Producción",
+            "programador": "Programador",
+            "po": "PO",
+            "prioridad": "Prioridad",
+            "calibre": "Calibre",
+            "proyecto_cliente": "Proyecto Cliente",
+            "descripcion_pronest": "Descripción Pronest"
+        }
+        df_display = df_ofs.rename(columns=rename_map)
         
-        # Buscar la fila seleccionada
-        of_row = df_ofs[df_ofs["of_number"] == selected_of_mod].iloc[0]
+        # Configuración de columnas
+        col_configs = {
+            "OF": st.column_config.TextColumn("Orden de Fabricación (OF)", disabled=True),
+            "Proyecto": st.column_config.TextColumn("Proyecto", disabled=False),
+            "Fecha de Producción": st.column_config.TextColumn("Fecha de Producción", disabled=False),
+            "Programador": st.column_config.TextColumn("Programador", disabled=False),
+            "PO": st.column_config.TextColumn("PO", disabled=False),
+            "Prioridad": st.column_config.TextColumn("Prioridad", disabled=False),
+            "Calibre": st.column_config.TextColumn("Calibre", disabled=False),
+            "Proyecto Cliente": st.column_config.TextColumn("Proyecto Cliente", disabled=False),
+            "Descripción Pronest": st.column_config.TextColumn("Descripción Pronest", disabled=False),
+        }
         
-        # Crear formulario para edición
-        with st.form("edit_of_form"):
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                new_proyecto = st.text_input("Nombre del Proyecto", value=str(of_row.get("proyecto", "") or ""))
-                new_fecha = st.text_input("Fecha de Producción", value=str(of_row.get("fecha", "") or ""))
-                new_programador = st.text_input("Programador", value=str(of_row.get("programador", "") or ""))
-                new_po = st.text_input("PO", value=str(of_row.get("po", "") or ""))
-            with col_m2:
-                new_prioridad = st.text_input("PRIORIDAD", value=str(of_row.get("prioridad", "") or ""))
-                new_calibre = st.text_input("CALIBRE", value=str(of_row.get("calibre", "") or ""))
-                new_proyecto_cliente = st.text_input("Nombre del Proyecto de Cliente", value=str(of_row.get("proyecto_cliente", "") or ""))
-                new_descripcion_pronest = st.text_input("Descripción de OF Pronest", value=str(of_row.get("descripcion_pronest", "") or ""))
-                
-            submitted = st.form_submit_button("💾 Guardar Cambios en la OF", type="primary", use_container_width=True)
-            if submitted:
-                # Actualizar base de datos
-                conn = get_connection()
-                c = conn.cursor()
-                c.execute("""
-                    UPDATE ordenes 
-                    SET proyecto = ?, programador = ?, fecha = ?, po = ?, prioridad = ?, calibre = ?, proyecto_cliente = ?, descripcion_pronest = ?
-                    WHERE of_number = ?
-                """, (new_proyecto, new_programador, new_fecha, new_po, new_prioridad, new_calibre, new_proyecto_cliente, new_descripcion_pronest, selected_of_mod))
+        edited_df = st.data_editor(
+            df_display,
+            column_config=col_configs,
+            use_container_width=True,
+            hide_index=True,
+            key="editor_ordenes_mantenimiento"
+        )
+        
+        if st.button("💾 Guardar Cambios en las OFs", type="primary", use_container_width=True):
+            conn = get_connection()
+            c = conn.cursor()
+            try:
+                for _, row in edited_df.iterrows():
+                    c.execute("""
+                        UPDATE ordenes 
+                        SET proyecto = ?, programador = ?, fecha = ?, po = ?, prioridad = ?, calibre = ?, proyecto_cliente = ?, descripcion_pronest = ?
+                        WHERE of_number = ?
+                    """, (
+                        row["Proyecto"], 
+                        row["Programador"], 
+                        row["Fecha de Producción"], 
+                        row["PO"], 
+                        row["Prioridad"], 
+                        row["Calibre"], 
+                        row["Proyecto Cliente"], 
+                        row["Descripción Pronest"],
+                        row["OF"]
+                    ))
                 conn.commit()
-                conn.close()
                 
-                # Si la OF que modificamos es la activa en sesión, actualizar el session_state también!
-                if st.session_state.get("of_number") == selected_of_mod:
-                    if st.session_state.get("production_data") is not None:
-                        st.session_state.production_data["proyecto"] = new_proyecto
-                        st.session_state.production_data["programador"] = new_programador
-                        st.session_state.production_data["fecha"] = new_fecha
-                        st.session_state.production_data["po"] = new_po
-                        st.session_state.production_data["prioridad"] = new_prioridad
-                        st.session_state.production_data["calibre"] = new_calibre
-                        st.session_state.production_data["proyecto_cliente"] = new_proyecto_cliente
-                        st.session_state.production_data["descripcion_pronest"] = new_descripcion_pronest
-                
-                st.success(f"✅ ¡Datos de la orden {selected_of_mod} actualizados correctamente!")
+                # Si la OF activa en sesión fue modificada, actualizar el session_state
+                active_of = st.session_state.get("of_number")
+                if active_of:
+                    row_active = edited_df[edited_df["OF"] == active_of]
+                    if not row_active.empty and st.session_state.get("production_data") is not None:
+                        r = row_active.iloc[0]
+                        st.session_state.production_data["proyecto"] = r["Proyecto"]
+                        st.session_state.production_data["programador"] = r["Programador"]
+                        st.session_state.production_data["fecha"] = r["Fecha de Producción"]
+                        st.session_state.production_data["po"] = r["PO"]
+                        st.session_state.production_data["prioridad"] = r["Prioridad"]
+                        st.session_state.production_data["calibre"] = r["Calibre"]
+                        st.session_state.production_data["proyecto_cliente"] = r["Proyecto Cliente"]
+                        st.session_state.production_data["descripcion_pronest"] = r["Descripción Pronest"]
+                        
+                st.success("✅ ¡Datos de todas las Órdenes de Fabricación actualizados con éxito!")
                 st.rerun()
+            except Exception as e:
+                st.error(f"Error al guardar cambios: {e}")
+            finally:
+                conn.close()
 
     st.markdown("---")
     
