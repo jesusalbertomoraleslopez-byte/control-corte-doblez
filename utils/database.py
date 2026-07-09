@@ -537,3 +537,19 @@ def get_dashboard_stats(of_list=None):
             
     conn.close()
     return stats
+
+def get_personal_prenomina():
+    """Carga la lista de personal de la prenomina desde local o GitHub raw url."""
+    import os
+    import pandas as pd
+    import streamlit as st
+    url_github = "https://raw.githubusercontent.com/jesusalbertomoraleslopez-byte/sigrama-prenomina-app/main/personal.xlsx"
+    local_path = "../sigrama-prenomina-app/personal.xlsx"
+    try:
+        if os.path.exists(local_path):
+            df = pd.read_excel(local_path)
+        else:
+            df = pd.read_excel(url_github)
+        return df
+    except Exception as e:
+        return pd.DataFrame(columns=["id_empleado", "nombre", "area"])
