@@ -485,6 +485,16 @@ def view_reportes():
             df_meta = pd.read_sql_query("SELECT * FROM ordenes", conn)
             conn.close()
             
+            excel_sheet_names = {
+                "Corte": "x-Cortar",
+                "Rebabeo": "x-Rebabear",
+                "Doblez": "x-Doblar",
+                "Barrenado": "x-Barrenar",
+                "Pintura": "x-Pintar",
+                "Liberado": "x-Liberar",
+                "Empaque": "x-Empacar"
+            }
+            
             # Recopilar datos detallados de todas las áreas y construir el Consolidado
             consolidado_rows = []
             detailed_dfs = {}
@@ -527,18 +537,18 @@ def view_reportes():
                     
                     # Añadir al Consolidado
                     df_c = df_area.copy()
-                    df_c.insert(0, 'Área / Proceso', friendly_names.get(area, area))
+                    df_c.insert(0, 'Área / Proceso', excel_sheet_names.get(area, area))
                     consolidado_rows.append(df_c)
                     
                     # Sumar para el Resumen
                     wip_sum = df_area['Cantidad WIP'].sum()
                     summary_rows.append({
-                        "Área / Proceso": friendly_names.get(area, area),
+                        "Área / Proceso": excel_sheet_names.get(area, area),
                         "Total Piezas en WIP": int(wip_sum)
                     })
                 else:
                     summary_rows.append({
-                        "Área / Proceso": friendly_names.get(area, area),
+                        "Área / Proceso": excel_sheet_names.get(area, area),
                         "Total Piezas en WIP": 0
                     })
             
@@ -561,10 +571,10 @@ def view_reportes():
                 df_consolidado.to_excel(writer, sheet_name='Consolidado', index=False)
                 style_excel_sheet(writer, df_consolidado, 'Consolidado')
                 
-                # 3. Escribir las pestañas individuales de cada área con nombres legibles
+                # 3. Escribir las pestañas individuales de cada área con nombres cortos
                 for area in relevant_procs:
                     df_area = detailed_dfs.get(area, pd.DataFrame(columns=['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'No. Parte', 'Descripción', 'Cantidad WIP']))
-                    sheet_title = friendly_names.get(area, area)[:31]
+                    sheet_title = excel_sheet_names.get(area, area)[:31]
                     df_area.to_excel(writer, sheet_name=sheet_title, index=False)
                     style_excel_sheet(writer, df_area, sheet_title)
                     
