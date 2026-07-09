@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from utils.database import get_connection
+from utils.database import get_connection, get_personal_prenomina
 
 def get_registros(tabla, of_number, area, nido="Todos", no_pieza="Todas"):
     conn = get_connection()
@@ -142,6 +142,14 @@ def view_correcciones():
     st.markdown("### 🟢 Avances Registrados")
     df_av = get_registros("avances", sel_of, sel_area, sel_nido, sel_pieza)
     
+    # Cargar todos los nombres de empleados de prenomina para usar en el editor
+    df_pers = get_personal_prenomina()
+    if not df_pers.empty:
+        ops_all = df_pers['nombre'].astype(str).str.strip().str.upper().dropna().unique().tolist()
+        ops_all.sort()
+    else:
+        ops_all = []
+        
     column_config = {
         "id": None,
         "🗑️ Eliminar": st.column_config.CheckboxColumn("Seleccionar", help="Marca esta casilla para eliminar el registro", default=False),
@@ -151,7 +159,7 @@ def view_correcciones():
         "no_pieza": st.column_config.TextColumn("No. Pieza", disabled=True),
         "area": st.column_config.TextColumn("Área", disabled=True),
         "cantidad": st.column_config.NumberColumn("Cantidad", disabled=False),
-        "operador": st.column_config.TextColumn("Operador", disabled=False),
+        "operador": st.column_config.SelectboxColumn("Operador", options=ops_all, disabled=False) if ops_all else st.column_config.TextColumn("Operador", disabled=False),
         "maquina": st.column_config.TextColumn("Máquina", disabled=False),
         "timestamp": st.column_config.DatetimeColumn("Fecha/Hora", disabled=True, format="YYYY-MM-DD HH:mm:ss")
     }
