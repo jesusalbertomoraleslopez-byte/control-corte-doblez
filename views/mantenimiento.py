@@ -507,3 +507,45 @@ def view_mantenimiento():
             
         with st.expander("🔍 Vista Previa del Catálogo a Respaldar"):
             st.dataframe(df_cat, use_container_width=True, height=250)
+
+    st.markdown("---")
+    st.header("💾 Respaldo y Restauración de la Base de Datos")
+    st.markdown(
+        """
+        Dado que el servidor en la nube es temporal (stateless), si el servidor se reinicia, los datos nuevos podrían perderse. 
+        Utiliza esta sección para descargar un respaldo completo de tu base de datos activa o restaurar la información desde un archivo guardado.
+        """
+    )
+    
+    col_db_dl, col_db_ul = st.columns(2)
+    
+    with col_db_dl:
+        st.subheader("📥 Descargar Respaldo")
+        st.markdown("Guarda una copia completa de toda la información actual (OFs, piezas, avances, scrap y permisos):")
+        try:
+            with open("sigrama.db", "rb") as f:
+                db_bytes = f.read()
+            st.download_button(
+                label="📥 Descargar sigrama.db",
+                data=db_bytes,
+                file_name="sigrama.db",
+                mime="application/octet-stream",
+                use_container_width=True,
+                type="primary"
+            )
+        except Exception as e:
+            st.error(f"No se pudo leer el archivo de base de datos: {e}")
+            
+    with col_db_ul:
+        st.subheader("📤 Restaurar Base de Datos")
+        st.markdown("Sube tu archivo de respaldo `sigrama.db` para recuperar al 100% todos tus registros en caso de reinicio:")
+        uploaded_db = st.file_uploader("Sube el archivo de respaldo (.db):", type=["db"], key="uploader_restore_db")
+        if uploaded_db is not None:
+            if st.button("🚨 Sobrescribir Base de Datos Activa", type="primary", use_container_width=True):
+                try:
+                    with open("sigrama.db", "wb") as f:
+                        f.write(uploaded_db.getbuffer())
+                    st.success("✅ ¡Base de datos restaurada con éxito! La aplicación se actualizará.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al restaurar base de datos: {e}")
