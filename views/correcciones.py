@@ -25,8 +25,25 @@ def delete_registros(tabla, ids_to_delete):
     if not ids_to_delete: return
     conn = get_connection()
     c = conn.cursor()
-    placeholders = ",".join("?" * len(ids_to_delete))
-    c.execute(f"DELETE FROM {tabla} WHERE id IN ({placeholders})", ids_to_delete)
+    
+    if tabla == "avances":
+        # Para cada ID, ver si es de Corte. Si es de Corte, obtener su of_number, nido y hoja para borrar todo el lote
+        for rid in ids_to_delete:
+            c.execute("SELECT of_number, nido, area, hoja FROM avances WHERE id = ?", (rid,))
+            row = c.fetchone()
+            if row:
+                of_num, nido, area, hoja = row
+                if area == "Corte" and hoja is not None:
+                    # Borrar todas las piezas asociadas a esta hoja de este nido en esta OF
+                    c.execute("DELETE FROM avances WHERE of_number = ? AND nido = ? AND area = 'Corte' AND hoja = ?", 
+                              (of_num, nido, hoja))
+                else:
+                    # Borrar normal por ID
+                    c.execute("DELETE FROM avances WHERE id = ?", (rid,))
+    else:
+        placeholders = ",".join("?" * len(ids_to_delete))
+        c.execute(f"DELETE FROM {tabla} WHERE id IN ({placeholders})", ids_to_delete)
+        
     conn.commit()
     conn.close()
 
