@@ -159,16 +159,12 @@ def view_correcciones():
         df_pers['area'] = df_pers['area'].astype(str).str.strip()
         
         target_areas = map_areas.get(sel_area, [])
-        ops_area = df_pers[df_pers['area'].isin(target_areas)]['nombre'].dropna().unique().tolist()
-        ops_area.sort()
+        ops_all = df_pers[df_pers['area'].isin(target_areas)]['nombre'].dropna().unique().tolist()
+        ops_all.sort()
         
-        ops_others = df_pers[~df_pers['area'].isin(target_areas)]['nombre'].dropna().unique().tolist()
-        ops_others.sort()
-        
-        if ops_area:
-            ops_all = ops_area + ["-- OTROS OPERADORES --"] + ops_others
-        else:
-            ops_all = ops_others
+        if not ops_all:
+            ops_all = df_pers['nombre'].dropna().unique().tolist()
+            ops_all.sort()
     else:
         ops_all = []
         

@@ -98,16 +98,12 @@ def view_avances():
             df_pers['area'] = df_pers['area'].astype(str).str.strip()
             
             target_areas = map_areas.get(area_seleccionada, [])
-            ops_area = df_pers[df_pers['area'].isin(target_areas)]['nombre'].dropna().unique().tolist()
-            ops_area.sort()
+            ops_list = df_pers[df_pers['area'].isin(target_areas)]['nombre'].dropna().unique().tolist()
+            ops_list.sort()
             
-            ops_others = df_pers[~df_pers['area'].isin(target_areas)]['nombre'].dropna().unique().tolist()
-            ops_others.sort()
-            
-            if ops_area:
-                ops_list = ops_area + ["-- OTROS OPERADORES --"] + ops_others
-            else:
-                ops_list = ops_others
+            if not ops_list:
+                ops_list = df_pers['nombre'].dropna().unique().tolist()
+                ops_list.sort()
                 
             operador = st.selectbox("4️⃣ Operador", ops_list, key="avance_operador")
         else:
@@ -274,8 +270,8 @@ def view_avances():
             )
             
             if st.button(f"✅ Registrar Hoja {hoja_actual} Terminada", type="primary"):
-                if not operador.strip() or operador == "-- OTROS OPERADORES --":
-                    st.error("⚠️ Por favor selecciona un Operador válido (no el separador).")
+                if not operador.strip():
+                    st.error("⚠️ Por favor selecciona un Operador válido.")
                     st.stop()
                     
                 df_terminadas = edited_df.copy()
@@ -451,8 +447,8 @@ def view_avances():
             edited_df["Rechazos"] = pd.to_numeric(edited_df["Rechazos"], errors='coerce').fillna(0).astype(int)
             
             if st.button(f"✅ Registrar Avance en {area_seleccionada}", type="primary"):
-                if not operador.strip() or operador == "-- OTROS OPERADORES --":
-                    st.error("⚠️ Por favor selecciona un Operador válido (no el separador).")
+                if not operador.strip():
+                    st.error("⚠️ Por favor selecciona un Operador válido.")
                     st.stop()
                     
                 df_terminadas = edited_df[edited_df["Terminadas"] > 0]
