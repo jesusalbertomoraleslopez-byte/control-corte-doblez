@@ -291,18 +291,29 @@ def view_reportes():
             "Empaque": "📦"
         }
         
+        friendly_names = {
+            "Corte": "Piezas por cortar",
+            "Rebabeo": "Piezas por rebabear",
+            "Doblez": "Piezas por doblar",
+            "Barrenado": "Piezas por barrenar",
+            "Pintura": "Piezas por pintar",
+            "Liberado": "Piezas por liberar",
+            "Empaque": "Piezas por empacar"
+        }
+        
         for i, proc in enumerate(relevant_procs):
             with cols[i % 4]:
                 wip_val = wip_data.get(proc, 0)
                 color = "#EC2024" if wip_val > 0 else "#28a745"
                 icon = process_icons.get(proc, "🏭")
                 pct = (wip_val / total_general * 100) if total_general > 0 else 0
+                label = friendly_names.get(proc, proc)
                 st.markdown(
                     f'''
                     <div style="background-color: #f8f9fa; border-top: 5px solid {color}; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative;">
                         <div style="position: absolute; top: 10px; right: 10px; background-color: #e9ecef; color: #495057; padding: 2px 8px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);">{pct:.1f}%</div>
                         <div style="font-size: 2.2rem; margin-bottom: 5px;">{icon}</div>
-                        <p style="margin: 0; font-size: 1.1rem; color: #555; font-weight: bold; text-transform: uppercase;">{proc}</p>
+                        <p style="margin: 0; font-size: 0.95rem; color: #555; font-weight: bold; text-transform: uppercase;">{label}</p>
                         <h2 style="margin: 5px 0 0 0; font-size: 3rem; font-weight: 900; color: {color};">{wip_val}</h2>
                     </div>
                     ''', unsafe_allow_html=True
@@ -310,7 +321,7 @@ def view_reportes():
                 
         # Gráfica de Barras
         df_chart = pd.DataFrame({
-            "Proceso": relevant_procs,
+            "Proceso": [friendly_names.get(p, p) for p in relevant_procs],
             "WIP Disponible": [wip_data.get(p, 0) for p in relevant_procs]
         })
         
@@ -323,21 +334,24 @@ def view_reportes():
         st.markdown("### 🔍 Detalle y Descarga de Piezas en WIP")
         st.markdown("Selecciona un proceso para ver la lista exacta de piezas y cantidades que se encuentran esperando en esa estación:")
         
-        proc_wip_selected = st.selectbox(
+        inv_friendly_names = {v: k for k, v in friendly_names.items()}
+        proc_wip_options = ["Selecciona un área..."] + [friendly_names[p] for p in relevant_procs]
+        proc_wip_selected_friendly = st.selectbox(
             "Selecciona un Proceso/Área:", 
-            ["Selecciona un área..."] + relevant_procs,
+            proc_wip_options,
             key="wip_detail_selector"
         )
         
-        if proc_wip_selected != "Selecciona un área...":
+        if proc_wip_selected_friendly != "Selecciona un área...":
+            proc_wip_selected = inv_friendly_names[proc_wip_selected_friendly]
             df_wip_det = get_wip_pieces_detail(of_list, proc_wip_selected)
             if df_wip_det.empty:
-                st.info(f"✅ No hay piezas pendientes (WIP) esperando en el área de **{proc_wip_selected}**.")
+                st.info(f"✅ No hay piezas pendientes (WIP) esperando en el área de **{proc_wip_selected_friendly}**.")
             else:
                 st.dataframe(df_wip_det, use_container_width=True, height=250, hide_index=True)
                 csv_data = df_wip_det.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    label=f"📥 Descargar Reporte de Piezas en WIP - {proc_wip_selected} (CSV)",
+                    label=f"📥 Descargar Reporte de Piezas en WIP - {proc_wip_selected_friendly} (CSV)",
                     data=csv_data,
                     file_name=f"WIP_{proc_wip_selected}_{display_name.replace(' ', '_')}.csv",
                     mime="text/csv",
