@@ -120,6 +120,97 @@ def get_global_wip_for_ofs(of_list):
             total_wip[k] = total_wip.get(k, 0) + v
     return total_wip
 
+def get_wip_pieces_detail(of_list, area):
+    details = []
+    
+    # Si viene "Todas", expandir a todas las OFs en la base de datos
+    if "Todas" in of_list:
+        of_list = get_all_ofs()
+        
+    for of_num in of_list:
+        df_todas = get_todas_piezas(of_num)
+        if df_todas.empty:
+            continue
+            
+        conn = get_connection()
+        df_avances_all = pd.read_sql_query("SELECT no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number=? GROUP BY no_pieza, area", conn, params=(of_num,))
+        df_rechazos_all = pd.read_sql_query("SELECT no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number=? GROUP BY no_pieza, area", conn, params=(of_num,))
+        conn.close()
+        
+        if 'hojas' not in df_todas.columns:
+            df_todas['hojas'] = 1
+        
+        df_todas['total_requeridas'] = pd.to_numeric(df_todas['cantidad'], errors='coerce').fillna(0) * pd.to_numeric(df_todas['hojas'], errors='coerce').fillna(1)
+        
+        if area == "Corte":
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("SELECT DISTINCT nido FROM avances WHERE of_number = ? AND area = 'Corte'", (of_num,))
+            terminados = [row[0] for row in c.fetchall()]
+            conn.close()
+            
+            df_corte_pend = df_todas[~df_todas['nido'].isin(terminados)]
+            if not df_corte_pend.empty:
+                df_g = df_corte_pend.groupby(['no_pieza', 'nombre_pieza'])['total_requeridas'].sum().reset_index()
+                df_g['of_number'] = of_num
+                df_g.rename(columns={'total_requeridas': 'cantidad_wip'}, inplace=True)
+                details.append(df_g)
+        else:
+            df_piezas = df_todas.copy()
+            df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in str(x).split(', '))
+            df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
+            
+            if df_piezas.empty:
+                continue
+                
+            df_piezas['area_anterior'] = df_piezas['ruta'].apply(lambda x: get_area_anterior(x, area))
+            df_agrupado = df_piezas.groupby(['no_pieza', 'nombre_pieza']).agg({
+                'total_requeridas': 'sum',
+                'area_anterior': 'first'
+            }).reset_index()
+            
+            def get_wip(row):
+                area_ant = row['area_anterior']
+                if pd.isna(area_ant) or not area_ant: return 0
+                wip = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['area'] == area_ant)]['cantidad'].sum()
+                return int(wip)
+                
+            def get_terminadas_ant(row):
+                term = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['area'] == area)]['cantidad'].sum()
+                return int(term)
+                
+            def get_rechazadas_ant(row):
+                rech = df_rechazos_all[(df_rechazos_all['no_pieza'] == row['no_pieza']) & (df_rechazos_all['area'] == area)]['cantidad'].sum()
+                return int(rech)
+                
+            df_agrupado['wip'] = df_agrupado.apply(get_wip, axis=1)
+            df_agrupado['term'] = df_agrupado.apply(get_terminadas_ant, axis=1)
+            df_agrupado['rech'] = df_agrupado.apply(get_rechazadas_ant, axis=1)
+            
+            df_agrupado['pendiente_disp'] = df_agrupado['wip'] - df_agrupado['term'] - df_agrupado['rech']
+            df_agrupado['pendiente_disp'] = df_agrupado['pendiente_disp'].apply(lambda x: max(0, x))
+            
+            df_g = df_agrupado[df_agrupado['pendiente_disp'] > 0][['no_pieza', 'nombre_pieza', 'pendiente_disp']].copy()
+            if not df_g.empty:
+                df_g['of_number'] = of_num
+                df_g.rename(columns={'pendiente_disp': 'cantidad_wip'}, inplace=True)
+                details.append(df_g)
+                
+    if not details:
+        return pd.DataFrame(columns=['OF', 'No. Pieza', 'Descripción', 'Cantidad WIP'])
+        
+    df_res = pd.concat(details, ignore_index=True)
+    df_res.rename(columns={
+        'of_number': 'OF',
+        'no_pieza': 'No. Pieza',
+        'nombre_pieza': 'Descripción',
+        'cantidad_wip': 'Cantidad WIP'
+    }, inplace=True)
+    
+    df_res = df_res[['OF', 'No. Pieza', 'Descripción', 'Cantidad WIP']]
+    df_res['Cantidad WIP'] = df_res['Cantidad WIP'].astype(int)
+    return df_res
+
 def view_reportes():
     st.markdown("## 📊 Dashboard de Reportes y WIP Global")
     
@@ -227,6 +318,32 @@ def view_reportes():
                      color="WIP Disponible", color_continuous_scale="Reds", text_auto=True)
         fig.update_layout(xaxis_title="Área / Proceso", yaxis_title="Cantidad de Piezas en WIP")
         st.plotly_chart(fig, use_container_width=True)
+        
+        # --- DETALLE DE WIP POR PROCESO ---
+        st.markdown("### 🔍 Detalle y Descarga de Piezas en WIP")
+        st.markdown("Selecciona un proceso para ver la lista exacta de piezas y cantidades que se encuentran esperando en esa estación:")
+        
+        proc_wip_selected = st.selectbox(
+            "Selecciona un Proceso/Área:", 
+            ["Selecciona un área..."] + relevant_procs,
+            key="wip_detail_selector"
+        )
+        
+        if proc_wip_selected != "Selecciona un área...":
+            df_wip_det = get_wip_pieces_detail(of_list, proc_wip_selected)
+            if df_wip_det.empty:
+                st.info(f"✅ No hay piezas pendientes (WIP) esperando en el área de **{proc_wip_selected}**.")
+            else:
+                st.dataframe(df_wip_det, use_container_width=True, height=250, hide_index=True)
+                csv_data = df_wip_det.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label=f"📥 Descargar Reporte de Piezas en WIP - {proc_wip_selected} (CSV)",
+                    data=csv_data,
+                    file_name=f"WIP_{proc_wip_selected}_{display_name.replace(' ', '_')}.csv",
+                    mime="text/csv",
+                    type="primary",
+                    use_container_width=True
+                )
         
         st.markdown("---")
         st.markdown("### 📥 Exportar Datos")
