@@ -104,9 +104,10 @@ def view_produccion():
     col_estado, col_btn = st.columns([3, 1])
     with col_estado:
         if active_of:
+            proj_client_info = f" | Cliente: {active_of.get('proyecto_cliente')}" if active_of.get('proyecto_cliente') else ""
             st.warning(
                 f"⚠️ OF Activa: **{active_of['of_number']}** — "
-                f"Proyecto: **{active_of['proyecto']}**"
+                f"Proyecto: **{active_of['proyecto']}**{proj_client_info}"
             )
         else:
             st.info("ℹ️ No hay registros activos.")
@@ -190,10 +191,19 @@ def view_produccion():
                                 return str(val).strip()
                         return "No encontrado"
 
+                    def clean_val(v):
+                        return "" if v == "No encontrado" else v
+
                     proy = get_val(df_orden, ['PROYECTO'])
                     prog = get_val(df_orden, ['PROGRAMADOR'])
                     fecha = get_val(df_orden, ['FECHA'], is_date=True)
                     of_num = get_val(df_orden, ['ORDEN DE FABRICAC', 'OF'])
+                    
+                    po = clean_val(get_val(df_orden, ['PO']))
+                    desc_pronest = clean_val(get_val(df_orden, ['DESCRIPCION DE OF PRONEST', 'DESCRIPCIÓN DE OF PRONEST', 'PRONEST']))
+                    calibre_of = clean_val(get_val(df_orden, ['CALIBRE']))
+                    prioridad = clean_val(get_val(df_orden, ['PRIORIDAD']))
+                    proy_cliente = clean_val(get_val(df_orden, ['NOMBRE DEL PROYECTO DE CLIENTE', 'PROYECTO DE CLIENTE', 'PROYECTO CLIENTE']))
 
                     # Normalizar NIDO y limpiar filas vacías
                     df_nidos = df_nidos.dropna(how='all')
@@ -205,12 +215,17 @@ def view_produccion():
                             df.dropna(subset=[col_n], inplace=True)
 
                     st.session_state.temp_production_data = {
-                        "proyecto":    proy,
-                        "programador": prog,
-                        "fecha":       fecha,
-                        "of_number":   of_num,
-                        "nidos":       df_nidos.astype(str),
-                        "piezas":      df_piezas.astype(str)
+                        "proyecto":            proy,
+                        "programador":         prog,
+                        "fecha":               fecha,
+                        "of_number":           of_num,
+                        "po":                  po,
+                        "descripcion_pronest": desc_pronest,
+                        "calibre":             calibre_of,
+                        "prioridad":           prioridad,
+                        "proyecto_cliente":    proy_cliente,
+                        "nidos":               df_nidos.astype(str),
+                        "piezas":              df_piezas.astype(str)
                     }
                 except Exception as e:
                     st.error(f"Error procesando el Excel: {str(e)}")
@@ -260,16 +275,26 @@ def view_produccion():
                         programador=data['programador'],
                         fecha=data['fecha'],
                         df_nidos=df_n,
-                        df_piezas=df_p
+                        df_piezas=df_p,
+                        po=data.get('po', ''),
+                        descripcion_pronest=data.get('descripcion_pronest', ''),
+                        calibre=data.get('calibre', ''),
+                        prioridad=data.get('prioridad', ''),
+                        proyecto_cliente=data.get('proyecto_cliente', '')
                     )
                     
                     st.session_state.production_data = {
-                        "proyecto":    data['proyecto'],
-                        "programador": data['programador'],
-                        "fecha":       data['fecha'],
-                        "nidos":       df_n,
-                        "piezas":      df_p,
-                        "totales":     df_totales,
+                        "proyecto":            data['proyecto'],
+                        "programador":         data['programador'],
+                        "fecha":               data['fecha'],
+                        "po":                  data.get('po', ''),
+                        "descripcion_pronest": data.get('descripcion_pronest', ''),
+                        "calibre":             data.get('calibre', ''),
+                        "prioridad":           data.get('prioridad', ''),
+                        "proyecto_cliente":    data.get('proyecto_cliente', ''),
+                        "nidos":               df_n,
+                        "piezas":              df_p,
+                        "totales":             df_totales,
                     }
                     st.session_state.of_number = data['of_number']
                     
@@ -289,10 +314,17 @@ def view_produccion():
             data = st.session_state.production_data
             st.subheader(f"📌 Resumen de la OF Activa: {st.session_state.of_number}")
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Proyecto",    data['proyecto'])
-            c2.metric("Programador", data['programador'])
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Proyecto",    data.get('proyecto', '—'))
+            c2.metric("Programador", data.get('programador', '—'))
             c3.metric("Fecha",       data.get('fecha', '—'))
+            c4.metric("PO",          data.get('po', '—'))
+            
+            c1_b, c2_b, c3_b, c4_b = st.columns(4)
+            c1_b.metric("Prioridad",   data.get('prioridad', '—'))
+            c2_b.metric("Calibre OF",   data.get('calibre', '—'))
+            c3_b.metric("Proyecto Cliente", data.get('proyecto_cliente', '—'))
+            c4_b.metric("Descripción Pronest", data.get('descripcion_pronest', '—'))
 
             df_t = data.get('totales', pd.DataFrame())
             if not df_t.empty and 'CANTIDAD * REPETICION' in df_t.columns:

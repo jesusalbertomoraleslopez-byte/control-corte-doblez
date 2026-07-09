@@ -50,7 +50,7 @@ def build_orden_sheet(ws):
     ws.sheet_view.showGridLines = False
 
     # Anchos
-    for col, w in [("A",22),("B",20),("C",22),("D",22),("E",16),("F",14),("G",14)]:
+    for col, w in [("A",22),("B",20),("C",22),("D",22),("E",16),("F",25),("G",14),("H",14),("I",25)]:
         ws.column_dimensions[col].width = w
 
     ws.row_dimensions[1].height = 38
@@ -63,16 +63,18 @@ def build_orden_sheet(ws):
         "Programador *",
         "Orden de Fabricación",
         "PO",
+        "Descripción de OF Pronest",
+        "Calibre",
         "PRIORIDAD",
-        "CALIBRE",
+        "Nombre del Proyecto de Cliente",
     ]
-    fills = [YELLOW_FILL, YELLOW_FILL, YELLOW_FILL, YELLOW_FILL, YELLOW_FILL, YELLOW_FILL, YELLOW_FILL]
+    fills = [YELLOW_FILL] * len(headers)
     for col_idx, (h, f) in enumerate(zip(headers, fills), start=1):
         cell = ws.cell(row=1, column=col_idx)
         apply_header(cell, h, f, font_color="111111", size=11)
 
     # Fila 2: Datos de ejemplo
-    ejemplos = ["PRUEBA 1", "2026/06/30", "BRYAN FLORES", "OF-00001", "2602-0711", 4, "Cal 14"]
+    ejemplos = ["PRUEBA 1", "2026/06/30", "BRYAN FLORES", "OF-00001", "2602-0711", "CORTE Y DOBLEZ DE PIEZAS", "Cal 14", 4, "CLIENTE SIGRAMA"]
     for c_idx, val in enumerate(ejemplos, start=1):
         cell = ws.cell(row=2, column=c_idx, value=val)
         cell.fill = PatternFill("solid", fgColor="FFFACD")
@@ -82,7 +84,7 @@ def build_orden_sheet(ws):
 
     # Filas vacías para uso futuro (3–10)
     for row in range(3, 11):
-        for col in range(1, 8):
+        for col in range(1, 10):
             cell = ws.cell(row=row, column=col)
             cell.fill = WHITE_FILL
             cell.border = thin_border()

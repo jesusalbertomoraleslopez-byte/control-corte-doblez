@@ -87,13 +87,19 @@ def init_db():
             FOREIGN KEY (of_number) REFERENCES ordenes (of_number)
         )
     ''')
-    
     # Intentar agregar la columna calibre a nidos si no existe (para compatibilidad con DBs anteriores)
     try:
         cursor.execute("ALTER TABLE nidos ADD COLUMN calibre TEXT")
     except sqlite3.OperationalError:
         pass  # La columna ya existe
         
+    # Intentar agregar las nuevas columnas a ordenes si no existen (para compatibilidad con DBs anteriores)
+    for col in ["po", "descripcion_pronest", "calibre", "prioridad", "proyecto_cliente"]:
+        try:
+            cursor.execute(f"ALTER TABLE ordenes ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            pass  # La columna ya existe
+            
     conn.commit()
     conn.close()
 
@@ -130,11 +136,25 @@ def get_active_of():
     """Devuelve la OF más reciente."""
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT of_number, proyecto, programador, fecha FROM ordenes ORDER BY fecha_carga DESC LIMIT 1")
+    c.execute("PRAGMA table_info(ordenes)")
+    columns = [row[1] for row in c.fetchall()]
+    
+    cols_to_select = ["of_number", "proyecto", "programador", "fecha"]
+    extra_cols = ["po", "descripcion_pronest", "calibre", "prioridad", "proyecto_cliente"]
+    for ec in extra_cols:
+        if ec in columns:
+            cols_to_select.append(ec)
+            
+    cols_str = ", ".join(cols_to_select)
+    c.execute(f"SELECT {cols_str} FROM ordenes ORDER BY fecha_carga DESC LIMIT 1")
     row = c.fetchone()
     conn.close()
+    
     if row:
-        return {"of_number": row[0], "proyecto": row[1], "programador": row[2], "fecha": row[3]}
+        res = {}
+        for idx, col_name in enumerate(cols_to_select):
+            res[col_name] = row[idx]
+        return res
     return None
 
 def get_all_ofs():
@@ -146,7 +166,8 @@ def get_all_ofs():
     conn.close()
     return [row[0] for row in rows]
 
-def save_production_plan(of_number, proyecto, programador, fecha, df_nidos, df_piezas):
+def save_production_plan(of_number, proyecto, programador, fecha, df_nidos, df_piezas,
+                         po="", descripcion_pronest="", calibre="", prioridad="", proyecto_cliente=""):
     conn = get_connection()
     c = conn.cursor()
     
@@ -156,7 +177,10 @@ def save_production_plan(of_number, proyecto, programador, fecha, df_nidos, df_p
         
     # 2. Insertar Orden
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute("INSERT INTO ordenes VALUES (?, ?, ?, ?, ?)", (of_number, proyecto, programador, fecha, now))
+    c.execute("""
+        INSERT INTO ordenes (of_number, proyecto, programador, fecha, fecha_carga, po, descripcion_pronest, calibre, prioridad, proyecto_cliente)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (of_number, proyecto, programador, fecha, now, po, descripcion_pronest, calibre, prioridad, proyecto_cliente))
     
     # 3. Insertar Nidos
     nido_col_n = next((col for col in df_nidos.columns if 'NIDO' in str(col).upper()), None)
