@@ -107,6 +107,34 @@ def view_avances():
     
     nido_seleccionado = "Seleccionar..."
     if is_corte:
+        # Calcular total de piezas en WIP para Corte
+        df_todas_copy = df_todas.copy()
+        df_todas_copy['hojas'] = pd.to_numeric(df_todas_copy['hojas'], errors='coerce').fillna(1).astype(int)
+        df_todas_copy['cantidad'] = pd.to_numeric(df_todas_copy['cantidad'], errors='coerce').fillna(0).astype(int)
+        df_todas_copy['total_req'] = df_todas_copy['cantidad'] * df_todas_copy['hojas']
+        total_planeadas = df_todas_copy['total_req'].sum()
+        
+        conn = get_connection()
+        if of_number == "Todas":
+            df_c = pd.read_sql_query("SELECT SUM(cantidad) as cortadas FROM avances WHERE area='Corte'", conn)
+        else:
+            df_c = pd.read_sql_query("SELECT SUM(cantidad) as cortadas FROM avances WHERE of_number=? AND area='Corte'", conn, params=(of_number,))
+        conn.close()
+        total_cortadas = df_c['cortadas'].iloc[0] or 0
+        total_wip_corte = max(0, total_planeadas - total_cortadas)
+        
+        st.markdown(
+            f"""
+            <div style="background-color: #f8f9fa; border-left: 8px solid #EC2024; padding: 25px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <h3 style="margin: 0; color: #555; font-size: 1.4rem; text-transform: uppercase;">Sumatoria WIP - Corte (Piezas por cortar)</h3>
+                <div style="display: flex; align-items: baseline; gap: 10px;">
+                    <h1 style="margin: 0; color: #EC2024; font-size: 4.5rem; font-weight: 900; line-height: 1;">{int(total_wip_corte)}</h1>
+                    <span style="font-size: 1.8rem; font-weight: bold; color: #666;">piezas disponibles para procesar</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True
+        )
+        
         st.markdown("👇 **Selecciona un Nido de la tabla haciendo clic en la fila correspondiente:**")
         
         # Obtener el estado de los nidos para esta área
