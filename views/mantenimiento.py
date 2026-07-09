@@ -157,6 +157,56 @@ def view_mantenimiento():
                 conn.close()
 
     st.markdown("---")
+    st.header("🗑️ Eliminar una Orden de Fabricación (OF) Específica")
+    st.markdown(
+        """
+        Si necesitas dar de baja una OF para volverla a cargar debido a cambios en cantidades, piezas o nidos, puedes eliminarla por completo aquí.
+        **Esta acción borrará definitivamente la orden, sus nidos, catálogo de piezas, avances y scrap.**
+        """
+    )
+    
+    # Obtener todas las OFs
+    conn = get_connection()
+    df_ofs_del = pd.read_sql_query("SELECT of_number FROM ordenes ORDER BY of_number ASC", conn)
+    conn.close()
+    
+    if df_ofs_del.empty:
+        st.info("ℹ️ No hay Órdenes de Fabricación cargadas en el sistema.")
+    else:
+        col_del_of, col_del_btn = st.columns([2, 1])
+        with col_del_of:
+            of_to_delete = st.selectbox("Selecciona la OF a eliminar por completo:", df_ofs_del["of_number"].tolist(), key="selectbox_delete_of")
+            confirm_del_of = st.checkbox(f"Confirmar que deseo eliminar de forma definitiva la **{of_to_delete}**", key="confirm_delete_of_chk")
+        
+        with col_del_btn:
+            st.write("") # Espacio para alinear verticalmente
+            st.write("")
+            if st.button("🗑️ Eliminar OF Seleccionada", type="primary", disabled=not confirm_del_of, use_container_width=True):
+                conn = get_connection()
+                c = conn.cursor()
+                try:
+                    c.execute("DELETE FROM ordenes WHERE of_number = ?", (of_to_delete,))
+                    c.execute("DELETE FROM nidos WHERE of_number = ?", (of_to_delete,))
+                    c.execute("DELETE FROM piezas WHERE of_number = ?", (of_to_delete,))
+                    c.execute("DELETE FROM avances WHERE of_number = ?", (of_to_delete,))
+                    c.execute("DELETE FROM rechazos WHERE of_number = ?", (of_to_delete,))
+                    conn.commit()
+                    
+                    # Si era la OF activa en sesión, limpiar de sesión
+                    if st.session_state.get("of_number") == of_to_delete:
+                        keys_to_clear = ['production_data', 'of_number', 'wip_data']
+                        for k in keys_to_clear:
+                            if k in st.session_state:
+                                del st.session_state[k]
+                                
+                    st.success(f"✅ ¡La orden {of_to_delete} y todos sus registros asociados han sido eliminados con éxito!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al eliminar la orden: {e}")
+                finally:
+                    conn.close()
+                    
+    st.markdown("---")
     
     col_reset, col_plans, col_delete = st.columns(3)
     
