@@ -762,6 +762,161 @@ def view_reportes():
                 type="primary",
                 use_container_width=True
             )
+            
+        # --- NUEVAS GRÁFICAS DE RENDIMIENTO SEMANAL (L-M-M-J-V-S-D) ---
+        st.markdown("---")
+        st.markdown("### 📅 Gráficas de Rendimiento Semanal (L-M-M-J-V-S-D)")
+        st.markdown("Visualiza la producción, mermas y evolución del WIP agrupados por proceso y por día de la semana:")
+        
+        # Obtener fecha máxima de la BD como default
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT MAX(date(timestamp)) FROM avances")
+        row = c.fetchone()
+        max_date_db = pd.to_datetime(row[0]).date() if (row and row[0]) else pd.to_datetime("today").date()
+        conn.close()
+        
+        ref_date = st.date_input(
+            "Selecciona un día para ver su semana correspondiente (Lunes a Domingo):",
+            value=max_date_db,
+            key="weekly_report_ref_date"
+        )
+        
+        # Calcular los 7 días de la semana
+        lunes = ref_date - pd.Timedelta(days=ref_date.weekday())
+        dias_semana = [lunes + pd.Timedelta(days=i) for i in range(7)]
+        dias_labels = ["L", "M", "M", "J", "V", "S", "D"]
+        dias_nombres_completos = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+        
+        # Consultar avances y rechazos para cada día de la semana
+        conn = get_connection()
+        
+        prod_areas = []
+        prod_dias = []
+        prod_valores = []
+        
+        scrap_areas = []
+        scrap_dias = []
+        scrap_valores = []
+        
+        wip_areas = []
+        wip_dias = []
+        wip_valores = []
+        
+        for idx_day, d in enumerate(dias_semana):
+            date_str = d.strftime('%Y-%m-%d')
+            day_label = dias_labels[idx_day]
+            
+            # Avances de este día
+            df_av_d = pd.read_sql_query(
+                "SELECT area, SUM(cantidad) as total FROM avances WHERE date(timestamp) = ? GROUP BY area",
+                conn, params=(date_str,)
+            )
+            # Rechazos de este día
+            df_rec_d = pd.read_sql_query(
+                "SELECT area, SUM(cantidad) as total FROM rechazos WHERE date(timestamp) = ? GROUP BY area",
+                conn, params=(date_str,)
+            )
+            
+            # Calcular WIP de este día
+            wip_on_date = calculate_wip_on_date(of_list, date_str)
+            
+            for proc in relevant_procs:
+                proc_friendly = friendly_names.get(proc, proc)
+                
+                # Producción
+                p_val = df_av_d[df_av_d['area'] == proc]['total'].sum() if not df_av_d.empty else 0
+                prod_areas.append(proc_friendly)
+                prod_dias.append(day_label)
+                prod_valores.append(int(p_val))
+                
+                # Scrap
+                s_val = df_rec_d[df_rec_d['area'] == proc]['total'].sum() if not df_rec_d.empty else 0
+                scrap_areas.append(proc_friendly)
+                scrap_dias.append(day_label)
+                scrap_valores.append(int(s_val))
+                
+                # WIP
+                w_val = wip_on_date.get(proc, 0)
+                wip_areas.append(proc_friendly)
+                wip_dias.append(day_label)
+                wip_valores.append(int(w_val))
+                
+        conn.close()
+        
+        # Crear pestañas para las 3 gráficas
+        tab_prod_w, tab_scrap_w, tab_wip_w = st.tabs([
+            "📈 Producción Semanal (L-M-M-J-V-S-D)",
+            "🚨 Scrap Semanal (L-M-M-J-V-S-D)",
+            "⏳ WIP Semanal (L-M-M-J-V-S-D)"
+        ])
+        
+        import plotly.graph_objects as go
+        
+        # Paleta de colores para los días L M M J V S D
+        colors_days = ['#FFD700', '#FF8C00', '#FF4500', '#EC2024', '#9370DB', '#00BFFF', '#32CD32']
+        
+        # Construir listas de colores repetidas
+        prod_colors_list = [colors_days[dias_labels.index(d)] for d in prod_dias]
+        scrap_colors_list = [colors_days[dias_labels.index(d)] for d in scrap_dias]
+        wip_colors_list = [colors_days[dias_labels.index(d)] for d in wip_dias]
+        
+        with tab_prod_w:
+            fig_p = go.Figure()
+            fig_p.add_trace(go.Bar(
+                x=[prod_areas, prod_dias],
+                y=prod_valores,
+                marker_color=prod_colors_list,
+                text=prod_valores,
+                textposition='outside'
+            ))
+            fig_p.update_layout(
+                title=f"<b>Producción Diaria por Estación (Semana del {lunes.strftime('%d/%m/%Y')} al {dias_semana[-1].strftime('%d/%m/%Y')})</b>",
+                title_x=0.5,
+                xaxis_title="Proceso / Día de la Semana",
+                yaxis_title="Piezas Producidas",
+                height=450,
+                margin=dict(t=50, b=50, l=40, r=40)
+            )
+            st.plotly_chart(fig_p, use_container_width=True)
+            
+        with tab_scrap_w:
+            fig_s = go.Figure()
+            fig_s.add_trace(go.Bar(
+                x=[scrap_areas, scrap_dias],
+                y=scrap_valores,
+                marker_color=scrap_colors_list,
+                text=scrap_valores,
+                textposition='outside'
+            ))
+            fig_s.update_layout(
+                title=f"<b>Scrap Registrado por Estación (Semana del {lunes.strftime('%d/%m/%Y')} al {dias_semana[-1].strftime('%d/%m/%Y')})</b>",
+                title_x=0.5,
+                xaxis_title="Proceso / Día de la Semana",
+                yaxis_title="Piezas Rechazadas",
+                height=450,
+                margin=dict(t=50, b=50, l=40, r=40)
+            )
+            st.plotly_chart(fig_s, use_container_width=True)
+            
+        with tab_wip_w:
+            fig_w = go.Figure()
+            fig_w.add_trace(go.Bar(
+                x=[wip_areas, wip_dias],
+                y=wip_valores,
+                marker_color=wip_colors_list,
+                text=wip_valores,
+                textposition='outside'
+            ))
+            fig_w.update_layout(
+                title=f"<b>Evolución del WIP por Estación (Semana del {lunes.strftime('%d/%m/%Y')} al {dias_semana[-1].strftime('%d/%m/%Y')})</b>",
+                title_x=0.5,
+                xaxis_title="Proceso / Día de la Semana",
+                yaxis_title="Piezas en WIP",
+                height=450,
+                margin=dict(t=50, b=50, l=40, r=40)
+            )
+            st.plotly_chart(fig_w, use_container_width=True)
         
     else:
         st.info("No hay datos para esta OF.")
