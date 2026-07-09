@@ -380,16 +380,66 @@ def view_reportes():
                 
             return output.getvalue()
             
+        # Generar Reporte de Piezas en WIP consolidado con una pestaña por área
+        def get_wip_consolidado_excel(ofs):
+            import io
+            conn = get_connection()
+            df_meta = pd.read_sql_query("SELECT * FROM ordenes", conn)
+            conn.close()
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                for area in relevant_procs:
+                    df_area = get_wip_pieces_detail(ofs, area)
+                    if not df_area.empty:
+                        # Unir con metadatos de las órdenes
+                        df_area = df_area.merge(df_meta, left_on='OF', right_on='of_number', how='left')
+                        if 'of_number' in df_area.columns:
+                            df_area.drop(columns=['of_number'], inplace=True)
+                        rename_map = {
+                            'proyecto': 'Proyecto',
+                            'programador': 'Programador',
+                            'fecha': 'Fecha Producción',
+                            'po': 'PO',
+                            'prioridad': 'Prioridad',
+                            'calibre': 'Calibre OF',
+                            'proyecto_cliente': 'Proyecto Cliente',
+                            'descripcion_pronest': 'Descripción Pronest'
+                        }
+                        df_area.rename(columns=rename_map, inplace=True)
+                        cols_first = ['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'Fecha Producción']
+                        cols_other = [c for c in df_area.columns if c not in cols_first]
+                        cols_first = [c for c in cols_first if c in df_area.columns]
+                        df_area = df_area[cols_first + cols_other]
+                    else:
+                        df_area = pd.DataFrame(columns=['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'No. Pieza', 'Descripción', 'Cantidad WIP'])
+                    
+                    df_area.to_excel(writer, sheet_name=area, index=False)
+            return output.getvalue()
+
         excel_data = get_excel_report(of_list)
+        wip_excel_data = get_wip_consolidado_excel(of_list)
         
         file_sufix = "Multiples" if len(of_list) != 1 or "Todas" in of_list else of_list[0]
-        st.download_button(
-            label="📊 Descargar Reporte de Transacciones y WIP (Excel)",
-            data=excel_data,
-            file_name=f"Reporte_Produccion_OF_{file_sufix}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary"
-        )
+        
+        col_dl1, col_dl2 = st.columns(2)
+        with col_dl1:
+            st.download_button(
+                label="📊 Descargar Reporte de Transacciones (Excel)",
+                data=excel_data,
+                file_name=f"Reporte_Transacciones_OF_{file_sufix}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        with col_dl2:
+            st.download_button(
+                label="📥 Descargar Reporte Detallado de WIP por Área (Excel)",
+                data=wip_excel_data,
+                file_name=f"Reporte_Detallado_WIP_Areas_{file_sufix}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True
+            )
         
     else:
         st.info("No hay datos para esta OF.")
