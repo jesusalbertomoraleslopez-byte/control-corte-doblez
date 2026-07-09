@@ -55,20 +55,44 @@ def view_dashboard_global():
         aprovechamiento = (piezas_procesadas / (piezas_procesadas + scrap_generado)) * 100
         
     c1, c2, c3, c4 = st.columns(4)
-    def render_kpi(label, val, col, color="#EC2024", subtitle=""):
+    def render_kpi(label, val, col, color="#EC2024", subtitle="", is_html=False):
+        val_content = val
+        if not is_html:
+            val_content = f'<h2 style="margin: 5px 0 0 0; font-size: 2.5rem; font-weight: 900; color: #111;">{val}</h2>'
         col.markdown(
             f'''
-            <div style="background-color: #f8f9fa; border-top: 5px solid {color}; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center;">
-                <p style="margin: 0; font-size: 0.85rem; color: #555; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">{label}</p>
-                <h2 style="margin: 5px 0 0 0; font-size: 2.5rem; font-weight: 900; color: #111;">{val}</h2>
-                <p style="margin: 0; font-size: 0.75rem; color: #888;">{subtitle}</p>
+            <div style="background-color: #f8f9fa; border-top: 5px solid {color}; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; min-height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <p style="margin: 0; font-size: 0.85rem; color: #555; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">{label}</p>
+                    {val_content}
+                </div>
+                <p style="margin: 5px 0 0 0; font-size: 0.75rem; color: #888;">{subtitle}</p>
             </div>
             ''', unsafe_allow_html=True
         )
     
+    # Calcular avances por área para el desglose
+    processes = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+    area_avances = {}
+    if not df_avances.empty:
+        area_av = df_avances.groupby('area')['cantidad'].sum().to_dict()
+        for p in processes:
+            area_avances[p] = area_av.get(p, 0)
+    else:
+        for p in processes:
+            area_avances[p] = 0
+            
+    # Formato de cuadrícula en 2 columnas para el KPI
+    val_html = '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 0.8rem; text-align: left; margin: 10px 0; padding: 0 5px; color: #333;">'
+    for p in processes:
+        display_name = p
+        if p == "Ingenieria": display_name = "Ingeniería"
+        val_html += f'<div><b>{display_name}:</b> {area_avances.get(p, 0):,}</div>'
+    val_html += '</div>'
+    
     render_kpi("Órdenes Totales", len(df_ofs), c1, subtitle="Cargadas en sistema")
     render_kpi("Piezas Solicitadas", f"{piezas_totales_req:,.0f}", c2, color="#00BFFF", subtitle="Total a producir")
-    render_kpi("Avances Registrados", f"{piezas_procesadas:,.0f}", c3, color="#32CD32", subtitle="Transacciones en piso")
+    render_kpi("Avances Registrados", val_html, c3, color="#32CD32", subtitle="Avance por proceso/área", is_html=True)
     render_kpi("Aprovechamiento", f"{aprovechamiento:.1f}%", c4, color="#FF8C00", subtitle=f"Scrap: {scrap_generado} pzs")
 
     st.markdown("---")
