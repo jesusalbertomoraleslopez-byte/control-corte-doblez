@@ -22,32 +22,52 @@ def view_avances():
         """, unsafe_allow_html=True
     )
     
-    todas_ofs = get_all_ofs()
-    if not todas_ofs:
-        st.warning("⚠️ No hay planes de producción en la base de datos. Por favor carga un archivo de Excel arriba.")
-        return
-        
-    todas_ofs_opciones = ["Todas"] + todas_ofs
+    # 1. Obtener proyectos y calibres disponibles para los filtros
+    conn = get_connection()
+    df_proj = pd.read_sql_query("SELECT DISTINCT proyecto FROM ordenes WHERE proyecto IS NOT NULL AND proyecto != ''", conn)
+    proyectos_list = ["Todos"] + df_proj["proyecto"].tolist()
     
-    # Fila 1: Area y OF
-    c1, c2 = st.columns(2)
-    with c1:
+    # Verificar si calibre existe en la base de datos
+    c_info = conn.cursor()
+    c_info.execute("PRAGMA table_info(nidos)")
+    nidos_cols = [row[1] for row in c_info.fetchall()]
+    if "calibre" in nidos_cols:
+        df_cal = pd.read_sql_query("SELECT DISTINCT calibre FROM nidos WHERE calibre IS NOT NULL AND calibre != ''", conn)
+        calibres_list = ["Todos"] + df_cal["calibre"].tolist()
+    else:
+        calibres_list = ["Todos"]
+    conn.close()
+
+    # Fila 1 de Filtros (3 columnas)
+    col_f1, col_f2, col_f3 = st.columns(3)
+    
+    with col_f1:
         area_seleccionada = st.selectbox("1️⃣ Área / Proceso", PROCESSES, key="avance_area")
-    with c2:
+        
+    with col_f2:
+        proyecto_seleccionado = st.selectbox("📂 Proyecto", proyectos_list, key="avance_proyecto_selector")
+        
+    with col_f3:
+        # Filtrar OFs disponibles por el proyecto seleccionado
+        conn = get_connection()
+        if proyecto_seleccionado == "Todos":
+            df_ofs_f = pd.read_sql_query("SELECT DISTINCT of_number FROM ordenes", conn)
+        else:
+            df_ofs_f = pd.read_sql_query("SELECT DISTINCT of_number FROM ordenes WHERE proyecto = ?", conn, params=(proyecto_seleccionado,))
+        conn.close()
+        
+        todas_ofs = df_ofs_f["of_number"].tolist()
+        todas_ofs_opciones = ["Todas"] + todas_ofs
         of_seleccionada = st.selectbox("2️⃣ Orden de Fabricación (OF)", todas_ofs_opciones, key="avance_of_selector")
         of_number = of_seleccionada
+
+    # Fila 2 de Filtros (3 columnas)
+    col_f4, col_f5, col_f6 = st.columns(3)
+    
+    with col_f4:
+        calibre_seleccionado = st.selectbox("📏 Calibre", calibres_list, key="avance_calibre_selector")
         
-    # Obtener piezas desde la Base de Datos
-    df_todas = get_todas_piezas(of_number)
-    if df_todas.empty:
-        st.error("No se encontraron piezas para esta Orden.")
-        return
-        
-    nidos_list = df_todas['nido'].unique().tolist()
-        
-    # Fila 2: Máquina y Operador
-    c3, c4 = st.columns(2)
-    with c3:
+    with col_f5:
         lista_maquinas = [
             "N/A", 
             "Láser 1", "Láser 2", "Láser 3", "Láser 4", 
@@ -57,8 +77,22 @@ def view_avances():
             "Manual"
         ]
         maquina = st.selectbox("3️⃣ Máquina", lista_maquinas, key="avance_maquina")
-    with c4:
+        
+    with col_f6:
         operador = st.text_input("4️⃣ Operador (Nombre o Nómina)", key="avance_operador")
+        
+    # Obtener piezas desde la Base de Datos
+    df_todas = get_todas_piezas(of_number)
+    
+    # Aplicar filtro de calibre en python
+    if calibre_seleccionado != "Todos" and "calibre" in df_todas.columns:
+        df_todas = df_todas[df_todas['calibre'] == calibre_seleccionado]
+        
+    if df_todas.empty:
+        st.warning("⚠️ No se encontraron piezas que coincidan con los filtros seleccionados.")
+        return
+        
+    nidos_list = df_todas['nido'].unique().tolist()
     
     is_ingenieria = (area_seleccionada == "Ingenieria")
     is_corte = (area_seleccionada == "Corte")

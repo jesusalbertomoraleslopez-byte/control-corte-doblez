@@ -88,6 +88,12 @@ def init_db():
         )
     ''')
     
+    # Intentar agregar la columna calibre a nidos si no existe (para compatibilidad con DBs anteriores)
+    try:
+        cursor.execute("ALTER TABLE nidos ADD COLUMN calibre TEXT")
+    except sqlite3.OperationalError:
+        pass  # La columna ya existe
+        
     conn.commit()
     conn.close()
 
@@ -155,6 +161,7 @@ def save_production_plan(of_number, proyecto, programador, fecha, df_nidos, df_p
     # 3. Insertar Nidos
     nido_col_n = next((col for col in df_nidos.columns if 'NIDO' in str(col).upper()), None)
     hojas_col = next((col for col in df_nidos.columns if 'HOJAS' in str(col).upper()), None)
+    calibre_col = next((col for col in df_nidos.columns if 'CALIBRE' in str(col).upper()), None)
     
     if nido_col_n and hojas_col:
         for _, row in df_nidos.iterrows():
@@ -165,8 +172,12 @@ def save_production_plan(of_number, proyecto, programador, fecha, df_nidos, df_p
             hojas_val = pd.to_numeric(row[hojas_col], errors='coerce')
             hojas_val = int(hojas_val) if pd.notna(hojas_val) else 1
             
-            c.execute("INSERT INTO nidos (of_number, nido, hojas) VALUES (?, ?, ?)", 
-                      (of_number, nido_val, hojas_val))
+            calibre_val = str(row[calibre_col]).strip() if calibre_col else ""
+            if calibre_val.lower() == 'nan':
+                calibre_val = ""
+            
+            c.execute("INSERT INTO nidos (of_number, nido, hojas, calibre) VALUES (?, ?, ?, ?)", 
+                      (of_number, nido_val, hojas_val, calibre_val))
             
     # 4. Insertar Piezas
     nido_col_p = next((col for col in df_piezas.columns if 'NIDO' in str(col).upper()), None)
@@ -225,15 +236,23 @@ def get_piezas_nido(of_number, nido):
 
 def get_todas_piezas(of_number=None):
     conn = get_connection()
+    # Check if calibre column exists in nidos to prevent errors on legacy DBs
+    c = conn.cursor()
+    c.execute("PRAGMA table_info(nidos)")
+    columns = [row[1] for row in c.fetchall()]
+    has_calibre = "calibre" in columns
+    
+    calibre_select = ", n.calibre" if has_calibre else ", '' as calibre"
+    
     if of_number == "Todas" or of_number is None:
-        df = pd.read_sql_query("""
-            SELECT p.of_number, p.nido, p.no_pieza, p.nombre_pieza, p.cantidad, p.ruta, n.hojas 
+        df = pd.read_sql_query(f"""
+            SELECT p.of_number, p.nido, p.no_pieza, p.nombre_pieza, p.cantidad, p.ruta, n.hojas {calibre_select}
             FROM piezas p
             JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
         """, conn)
     else:
-        df = pd.read_sql_query("""
-            SELECT p.of_number, p.nido, p.no_pieza, p.nombre_pieza, p.cantidad, p.ruta, n.hojas 
+        df = pd.read_sql_query(f"""
+            SELECT p.of_number, p.nido, p.no_pieza, p.nombre_pieza, p.cantidad, p.ruta, n.hojas {calibre_select}
             FROM piezas p
             JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
             WHERE p.of_number = ?
