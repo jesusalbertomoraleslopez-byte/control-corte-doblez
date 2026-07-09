@@ -485,32 +485,30 @@ def view_reportes():
             df_meta = pd.read_sql_query("SELECT * FROM ordenes", conn)
             conn.close()
             
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                for area in relevant_procs:
-                    df_area = get_wip_pieces_detail(ofs, area)
-                    if not df_area.empty:
-                        df_area = df_area.merge(df_meta, left_on='OF', right_on='of_number', how='left')
-                        if 'of_number' in df_area.columns:
-                            df_area.drop(columns=['of_number'], inplace=True)
-                        rename_map = {
-                            'proyecto': 'Proyecto',
-                            'programador': 'Programador',
-                            'fecha': 'Fecha Producción',
-                            'po': 'PO',
-                            'prioridad': 'Prioridad',
-                            'calibre': 'Calibre OF',
-                            'proyecto_cliente': 'Proyecto Cliente',
-                            'descripcion_pronest': 'Descripción Pronest',
-                            'fecha_carga': 'Fecha Carga'
-                        }
-                        df_area.rename(columns=rename_map, inplace=True)
-                        cols_first = ['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'Fecha Producción']
-                        cols_other = [c for c in df_area.columns if c not in cols_first]
-                        cols_first = [c for c in cols_first if c in df_area.columns]
-                        df_area = df_area[cols_first + cols_other]
-                    else:
-                        df_area = pd.DataFrame(columns=['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'No. Parte', 'Descripción', 'Cantidad WIP'])
+            # Recopilar datos detallados de todas las áreas y construir el Consolidado
+            consolidado_rows = []
+            detailed_dfs = {}
+            summary_rows = []
+            
+            for area in relevant_procs:
+                df_area = get_wip_pieces_detail(ofs, area)
+                
+                if not df_area.empty:
+                    df_area = df_area.merge(df_meta, left_on='OF', right_on='of_number', how='left')
+                    if 'of_number' in df_area.columns:
+                        df_area.drop(columns=['of_number'], inplace=True)
+                    rename_map = {
+                        'proyecto': 'Proyecto',
+                        'programador': 'Programador',
+                        'fecha': 'Fecha Producción',
+                        'po': 'PO',
+                        'prioridad': 'Prioridad',
+                        'calibre': 'Calibre OF',
+                        'proyecto_cliente': 'Proyecto Cliente',
+                        'descripcion_pronest': 'Descripción Pronest',
+                        'fecha_carga': 'Fecha Carga'
+                    }
+                    df_area.rename(columns=rename_map, inplace=True)
                     
                     df_area.rename(columns={
                         'no_pieza': 'No. Parte',
@@ -519,8 +517,57 @@ def view_reportes():
                         'pendiente_disp': 'Cantidad WIP'
                     }, inplace=True)
                     
-                    df_area.to_excel(writer, sheet_name=area, index=False)
-                    style_excel_sheet(writer, df_area, area)
+                    cols_first = ['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'Fecha Producción']
+                    cols_other = [c for c in df_area.columns if c not in cols_first]
+                    cols_first = [c for c in cols_first if c in df_area.columns]
+                    df_area = df_area[cols_first + cols_other]
+                    
+                    # Guardar para la pestaña del área
+                    detailed_dfs[area] = df_area
+                    
+                    # Añadir al Consolidado
+                    df_c = df_area.copy()
+                    df_c.insert(0, 'Área / Proceso', friendly_names.get(area, area))
+                    consolidado_rows.append(df_c)
+                    
+                    # Sumar para el Resumen
+                    wip_sum = df_area['Cantidad WIP'].sum()
+                    summary_rows.append({
+                        "Área / Proceso": friendly_names.get(area, area),
+                        "Total Piezas en WIP": int(wip_sum)
+                    })
+                else:
+                    summary_rows.append({
+                        "Área / Proceso": friendly_names.get(area, area),
+                        "Total Piezas en WIP": 0
+                    })
+            
+            # Construir DataFrame de Resumen por Área
+            df_resumen_wip = pd.DataFrame(summary_rows)
+            
+            # Construir DataFrame de Consolidado
+            if consolidado_rows:
+                df_consolidado = pd.concat(consolidado_rows, ignore_index=True)
+            else:
+                df_consolidado = pd.DataFrame(columns=['Área / Proceso', 'OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'No. Parte', 'Descripción', 'Cantidad WIP'])
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                # 1. Escribir el Resumen por Área
+                df_resumen_wip.to_excel(writer, sheet_name='Resumen por Área', index=False)
+                style_excel_sheet(writer, df_resumen_wip, 'Resumen por Área')
+                
+                # 2. Escribir el Consolidado
+                df_consolidado.to_excel(writer, sheet_name='Consolidado', index=False)
+                style_excel_sheet(writer, df_consolidado, 'Consolidado')
+                
+                # 3. Escribir las pestañas individuales de cada área con nombres legibles
+                for area in relevant_procs:
+                    df_area = detailed_dfs.get(area, pd.DataFrame(columns=['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'No. Parte', 'Descripción', 'Cantidad WIP']))
+                    sheet_title = friendly_names.get(area, area)[:31]
+                    df_area.to_excel(writer, sheet_name=sheet_title, index=False)
+                    style_excel_sheet(writer, df_area, sheet_title)
+                    
             return output.getvalue()
 
         excel_data = get_excel_report(of_list)
