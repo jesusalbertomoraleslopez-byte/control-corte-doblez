@@ -68,14 +68,17 @@ def view_avances():
         calibre_seleccionado = st.selectbox("📏 Calibre", calibres_list, key="avance_calibre_selector")
         
     with col_f5:
-        lista_maquinas = [
-            "N/A", 
-            "Láser 1", "Láser 2", "Láser 3", "Láser 4", 
-            "Dobladora 1", "Dobladora 2", "Dobladora 3", "Dobladora 4", 
-            "Lijadora 1", "Lijadora 2", 
-            "Línea de Pintura Batch", "Línea Continua", 
-            "Manual"
-        ]
+        maquinas_por_area = {
+            "Corte": ["Laser 1", "Laser 2", "Laser 3", "Laser 4"],
+            "Rebabeo": ["Lijadora 1", "Lijadora 2"],
+            "Doblez": ["Dobladora 1", "Dobladora 2", "Dobladora 3", "Dobladora 4"],
+            "Barrenado": ["Manual"],
+            "Pintura": ["Linea Continua", "Linea de Pintura"],
+            "Liberado": ["Manual", "N/A"],
+            "Empaque": ["Manual", "N/A"],
+            "Ingenieria": ["N/A"]
+        }
+        lista_maquinas = maquinas_por_area.get(area_seleccionada, ["N/A"])
         maquina = st.selectbox("3️⃣ Máquina", lista_maquinas, key="avance_maquina")
         
     with col_f6:
