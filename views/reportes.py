@@ -211,6 +211,91 @@ def get_wip_pieces_detail(of_list, area):
     df_res['Cantidad WIP'] = df_res['Cantidad WIP'].astype(int)
     return df_res
 
+def calculate_wip_on_date(of_list, target_date_str):
+    limit_timestamp = f"{target_date_str} 23:59:59"
+    
+    conn = get_connection()
+    c = conn.cursor()
+    if "Todas" in of_list:
+        c.execute("SELECT of_number, nido FROM avances WHERE area = 'Corte' AND timestamp <= ?", (limit_timestamp,))
+        terminados_tuples = set((row[0], row[1]) for row in c.fetchall())
+    else:
+        placeholders = ','.join(['?'] * len(of_list))
+        c.execute(f"SELECT of_number, nido FROM avances WHERE area = 'Corte' AND timestamp <= ? AND of_number IN ({placeholders})", [limit_timestamp] + list(of_list))
+        terminados_tuples = set((row[0], row[1]) for row in c.fetchall())
+    conn.close()
+    
+    wip_por_area = {}
+    relevant_procs = [p for p in PROCESSES if p != "Ingenieria"]
+    actual_ofs = get_all_ofs() if "Todas" in of_list else of_list
+    
+    for area in relevant_procs:
+        total_wip_area = 0
+        
+        for of_num in actual_ofs:
+            df_todas = get_todas_piezas(of_num)
+            if df_todas.empty:
+                continue
+                
+            if 'hojas' not in df_todas.columns:
+                df_todas['hojas'] = 1
+            df_todas['total_requeridas'] = pd.to_numeric(df_todas['cantidad'], errors='coerce').fillna(0) * pd.to_numeric(df_todas['hojas'], errors='coerce').fillna(1)
+            
+            conn = get_connection()
+            df_avances_all = pd.read_sql_query(
+                "SELECT no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number=? AND timestamp <= ? GROUP BY no_pieza, area",
+                conn, params=(of_num, limit_timestamp)
+            )
+            df_rechazos_all = pd.read_sql_query(
+                "SELECT no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number=? AND timestamp <= ? GROUP BY no_pieza, area",
+                conn, params=(of_num, limit_timestamp)
+            )
+            conn.close()
+            
+            if area == "Corte":
+                df_corte_pend = df_todas[~df_todas.apply(lambda row: (row['of_number'], row['nido']) in terminados_tuples, axis=1)]
+                total_wip_area += int(df_corte_pend['total_requeridas'].sum())
+            else:
+                df_piezas = df_todas.copy()
+                df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in str(x).split(', '))
+                df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
+                
+                if df_piezas.empty:
+                    continue
+                    
+                df_piezas['area_anterior'] = df_piezas['ruta'].apply(lambda x: get_area_anterior(x, area))
+                df_agrupado = df_piezas.groupby('no_pieza').agg({
+                    'total_requeridas': 'sum',
+                    'area_anterior': 'first'
+                }).reset_index()
+                
+                def get_wip(row):
+                    area_ant = row['area_anterior']
+                    if pd.isna(area_ant) or not area_ant: return 0
+                    wip = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['area'] == area_ant)]['cantidad'].sum()
+                    return int(wip)
+                    
+                def get_terminadas_ant(row):
+                    term = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['area'] == area)]['cantidad'].sum()
+                    return int(term)
+                    
+                def get_rechazadas_ant(row):
+                    rech = df_rechazos_all[(df_rechazos_all['no_pieza'] == row['no_pieza']) & (df_rechazos_all['area'] == area)]['cantidad'].sum()
+                    return int(rech)
+                    
+                df_agrupado['wip'] = df_agrupado.apply(get_wip, axis=1)
+                df_agrupado['term'] = df_agrupado.apply(get_terminadas_ant, axis=1)
+                df_agrupado['rech'] = df_agrupado.apply(get_rechazadas_ant, axis=1)
+                
+                df_agrupado['pendiente_disp'] = df_agrupado['wip'] - df_agrupado['term'] - df_agrupado['rech']
+                df_agrupado['pendiente_disp'] = df_agrupado['pendiente_disp'].apply(lambda x: max(0, x))
+                
+                total_wip_area += int(df_agrupado['pendiente_disp'].sum())
+                
+        wip_por_area[area] = total_wip_area
+        
+    return wip_por_area
+
 def style_excel_sheet(writer, df, sheet_name):
     workbook = writer.book
     worksheet = writer.sheets[sheet_name]
@@ -370,16 +455,90 @@ def view_reportes():
                     ''', unsafe_allow_html=True
                 )
                 
-        # Gráfica de Barras
-        df_chart = pd.DataFrame({
-            "Proceso": [friendly_names.get(p, p) for p in relevant_procs],
-            "WIP Disponible": [wip_data.get(p, 0) for p in relevant_procs]
-        })
+        # Tabs para Gráfica de Pareto y Tendencia
+        tab_pareto_act, tab_tendencia_wip = st.tabs([
+            "📊 Cuello de Botella Actual (Pareto)",
+            "📈 Histórico y Tendencia del WIP (Lunes a Sábado)"
+        ])
         
-        fig = px.bar(df_chart, x="Proceso", y="WIP Disponible", title="Distribución del Cuello de Botella (WIP en Piso)", 
-                     color="WIP Disponible", color_continuous_scale="Reds", text_auto=True)
-        fig.update_layout(xaxis_title="Área / Proceso", yaxis_title="Cantidad de Piezas en WIP")
-        st.plotly_chart(fig, use_container_width=True)
+        with tab_pareto_act:
+            df_chart = pd.DataFrame({
+                "Proceso": [friendly_names.get(p, p) for p in relevant_procs],
+                "WIP Disponible": [wip_data.get(p, 0) for p in relevant_procs]
+            })
+            fig = px.bar(df_chart, x="Proceso", y="WIP Disponible", title="Distribución del Cuello de Botella (WIP en Piso)", 
+                         color="WIP Disponible", color_continuous_scale="Reds", text_auto=True)
+            fig.update_layout(xaxis_title="Área / Proceso", yaxis_title="Cantidad de Piezas en WIP")
+            st.plotly_chart(fig, use_container_width=True)
+            
+        with tab_tendencia_wip:
+            # Obtener todas las fechas con avances
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("SELECT DISTINCT date(timestamp) FROM avances WHERE timestamp IS NOT NULL ORDER BY date(timestamp) ASC")
+            all_dates = [row[0] for row in c.fetchall() if row[0]]
+            conn.close()
+            
+            if all_dates:
+                min_d = pd.to_datetime(all_dates[0]).date()
+                max_d = pd.to_datetime(all_dates[-1]).date()
+                default_start = pd.to_datetime(all_dates[-min(7, len(all_dates))]).date()
+                
+                col_date_start, col_date_end = st.columns(2)
+                with col_date_start:
+                    start_date = st.date_input("Fecha Inicio Tendencia:", default_start, min_value=min_d, max_value=max_d, key="wip_trend_start")
+                with col_date_end:
+                    end_date = st.date_input("Fecha Fin Tendencia:", max_d, min_value=min_d, max_value=max_d, key="wip_trend_end")
+            else:
+                start_date = pd.to_datetime("today").date() - pd.Timedelta(days=7)
+                end_date = pd.to_datetime("today").date()
+                
+            date_range = pd.date_range(start=start_date, end=end_date).strftime('%Y-%m-%d').tolist()
+            
+            wip_history = []
+            for date_str in date_range:
+                dt_obj = pd.to_datetime(date_str)
+                dias_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+                day_name = dias_es[dt_obj.weekday()]
+                display_label = f"{day_name} ({dt_obj.strftime('%d/%m')})"
+                
+                wip_on_date = calculate_wip_on_date(of_list, date_str)
+                for area, val in wip_on_date.items():
+                    wip_history.append({
+                        "Fecha": display_label,
+                        "Área / Proceso": friendly_names.get(area, area),
+                        "Piezas en WIP": val
+                    })
+                    
+            df_history = pd.DataFrame(wip_history)
+            if not df_history.empty:
+                fig_trend = px.line(
+                    df_history, 
+                    x="Fecha", 
+                    y="Piezas en WIP", 
+                    color="Área / Proceso",
+                    title="Evolución Diaria del WIP por Área",
+                    markers=True,
+                    line_shape="spline",
+                    color_discrete_map={
+                        "Piezas por cortar": "#FFD700",
+                        "Piezas por rebabear": "#FF6347",
+                        "Piezas por doblar": "#DC143C",
+                        "Piezas por barrenar": "#8B0000",
+                        "Piezas por pintar": "#9370DB",
+                        "Piezas por liberar": "#00BFFF",
+                        "Piezas por empacar": "#32CD32"
+                    }
+                )
+                fig_trend.update_layout(
+                    xaxis_title="Día de la Semana",
+                    yaxis_title="Piezas en Espera (WIP)",
+                    legend_title="Estación de Trabajo",
+                    hovermode="x unified"
+                )
+                st.plotly_chart(fig_trend, use_container_width=True)
+            else:
+                st.info("No hay datos históricos suficientes para calcular la tendencia del WIP.")
         
         # --- DETALLE DE WIP POR PROCESO ---
         st.markdown("### 🔍 Detalle y Descarga de Piezas en WIP")
