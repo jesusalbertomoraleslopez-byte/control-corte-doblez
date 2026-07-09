@@ -4,7 +4,7 @@ from utils.database import get_connection
 
 def get_registros(tabla, operador="Todos", area="Todas"):
     conn = get_connection()
-    query = f"SELECT id, of_number, nido, no_pieza, area, cantidad, operador, maquina, timestamp FROM {tabla} WHERE 1=1"
+    query = f"SELECT id, of_number, nido, hoja, no_pieza, area, cantidad, operador, maquina, timestamp FROM {tabla} WHERE 1=1"
     params = []
     
     if operador != "Todos":
@@ -94,6 +94,7 @@ def view_correcciones():
             "🗑️ Eliminar": st.column_config.CheckboxColumn("Seleccionar", help="Marca esta casilla para eliminar el registro", default=False),
             "of_number": st.column_config.TextColumn("OF", disabled=True),
             "nido": st.column_config.TextColumn("Nido", disabled=True),
+            "hoja": st.column_config.NumberColumn("Hoja", disabled=True),
             "no_pieza": st.column_config.TextColumn("No. Pieza", disabled=True),
             "area": st.column_config.TextColumn("Área", disabled=True),
             "cantidad": st.column_config.NumberColumn("Cantidad", disabled=False),
@@ -133,7 +134,7 @@ def view_correcciones():
     st.markdown("### 🔴 Rechazos Registrados (Últimos 500)")
     # Obtener columna motivo para rechazos
     conn = get_connection()
-    query_r = "SELECT id, of_number, nido, no_pieza, area, cantidad, motivo, operador, maquina, timestamp FROM rechazos WHERE 1=1"
+    query_r = "SELECT id, of_number, nido, hoja, no_pieza, area, cantidad, motivo, operador, maquina, timestamp FROM rechazos WHERE 1=1"
     params_r = []
     
     if sel_operador != "Todos":
