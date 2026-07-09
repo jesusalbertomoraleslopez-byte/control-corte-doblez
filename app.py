@@ -90,14 +90,13 @@ def render_sidebar():
         "2. CONSULTAS Y REPORTES",
         "3. PLANEACIÓN",
         "4. CONTROL DE PRODUCCIÓN",
-        "5. MANUFACTURA INTELIGENTE",
-        "6. MANUAL DEL SISTEMA"
+        "5. MANUFACTURA INTELIGENTE Y MANUAL"
     ]
     
     if st.session_state.role == "Administrador":
         menu.extend([
-            "7. MANTENIMIENTO",
-            "8. SGC (Oculto - Solo Admin)"
+            "6. MANTENIMIENTO",
+            "7. SGC (Oculto - Solo Admin)"
         ])
         
     choice = st.sidebar.radio("Navegación", menu)
@@ -137,7 +136,6 @@ from views.consultas import view_consultas
 from views.dashboard import view_dashboard
 from views.dashboard_global import view_dashboard_global
 from views.manufactura import view_manufactura
-from views.manual import view_manual
 
 # --- Vistas Principales (imported from views/) ---
 
@@ -201,13 +199,11 @@ def main():
             view_planeacion()
         elif choice == "4. CONTROL DE PRODUCCIÓN":
             view_produccion()
-        elif choice == "5. MANUFACTURA INTELIGENTE":
+        elif choice == "5. MANUFACTURA INTELIGENTE Y MANUAL":
             view_manufactura()
-        elif choice == "6. MANUAL DEL SISTEMA":
-            view_manual()
-        elif choice == "7. MANTENIMIENTO":
+        elif choice == "6. MANTENIMIENTO":
             view_mantenimiento()
-        elif choice == "8. SGC (Oculto - Solo Admin)":
+        elif choice == "7. SGC (Oculto - Solo Admin)":
             view_sgc()
 
 if __name__ == "__main__":

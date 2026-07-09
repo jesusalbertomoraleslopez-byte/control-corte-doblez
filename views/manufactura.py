@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 
 # ─────────────────────────────────────────────
 #  CORPORATE COLORS
@@ -370,6 +371,158 @@ def _tab_stack():
     )
 
 
+def _tab_manual():
+    st.markdown(
+        f"""
+        <div style="background:linear-gradient(135deg,{BLACK} 0%,#1a1a2e 100%);
+                    border-radius:12px;padding:24px 28px;margin-bottom:20px;">
+            <h2 style="color:{WHITE};font-family:Montserrat,sans-serif;margin:0 0 6px;">
+                📖 Manual de Operación del Sistema
+            </h2>
+            <p style="color:rgba(255,255,255,0.8);font-family:Questrial,sans-serif;font-size:14px;margin:0;">
+                Centro de Capacitación y Guía de Operación — SIGRAMA
+            </p>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"""
+        <h3 style="font-family:Montserrat,sans-serif;color:{RED};font-size:17px;margin-top:20px;">
+            👥 1. Perfiles y Roles de Usuario
+        </h3>""",
+        unsafe_allow_html=True,
+    )
+    col_u1, col_u2 = st.columns(2)
+    with col_u1:
+        st.markdown(
+            f"""
+            <div style="background:{WHITE};border-left:5px solid {RED};border-radius:8px;padding:18px;margin-bottom:15px;box-shadow:0 2px 8px rgba(0,0,0,0.05);min-height:220px;">
+                <h4 style="font-family:Montserrat,sans-serif;color:{BLACK};margin-top:0;margin-bottom:8px;">👑 Perfil Administrador</h4>
+                <p style="font-family:Questrial,sans-serif;font-size:13px;color:#444;line-height:1.6;margin:0;">
+                    <b>Responsabilidad:</b> Control total de la planeación, configuración del sistema y auditoría.<br><br>
+                    <b>Permisos Exclusivos:</b>
+                    <br>• Importar planes de producción (Excel)
+                    <br>• Eliminar u ordenar OFs de la base de datos
+                    <br>• Corregir transacciones de avances o rechazos
+                    <br>• Configurar matriz de operadores y áreas
+                </p>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+    with col_u2:
+        st.markdown(
+            f"""
+            <div style="background:{WHITE};border-left:5px solid {BLACK};border-radius:8px;padding:18px;margin-bottom:15px;box-shadow:0 2px 8px rgba(0,0,0,0.05);min-height:220px;">
+                <h4 style="font-family:Montserrat,sans-serif;color:{BLACK};margin-top:0;margin-bottom:8px;">⚙️ Perfil Operador</h4>
+                <p style="font-family:Questrial,sans-serif;font-size:13px;color:#444;line-height:1.6;margin:0;">
+                    <b>Responsabilidad:</b> Registrar en tiempo real la producción realizada en piso.<br><br>
+                    <b>Permisos Permitidos:</b>
+                    <br>• Cargar avances (piezas correctas) por estación
+                    <br>• Cargar scrap (piezas rechazadas) con su motivo
+                    <br>• Consultar el WIP disponible de su área de trabajo
+                    <br>• Registrar re-cortes o reposición de piezas
+                </p>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        f"""
+        <h3 style="font-family:Montserrat,sans-serif;color:{RED};font-size:17px;margin-top:20px;">
+            🧭 2. Guía de Módulos del Sistema
+        </h3>""",
+        unsafe_allow_html=True,
+    )
+    
+    tab_m1, tab_m2, tab_m3 = st.tabs([
+        "📊 Dashboards",
+        "📅 Consultas y Reportes",
+        "🛠️ Control de Producción"
+    ])
+    
+    with tab_m1:
+        st.markdown(
+            f"""
+            <p style="font-family:Questrial,sans-serif;font-size:14px;color:#333;line-height:1.7;">
+                <b>• Dashboard Principal:</b> Carga inicial del plan de producción en Excel. Muestra los KPIs globales (Total Nidos, Piezas, % Avance Global) y el pipeline WIP interactivo en Plotly.
+                <br><b>• Dashboard Global:</b> Consolidación de múltiples OFs seleccionadas en simultáneo para visualización ejecutiva.
+            </p>""",
+            unsafe_allow_html=True,
+        )
+    with tab_m2:
+        st.markdown(
+            f"""
+            <p style="font-family:Questrial,sans-serif;font-size:14px;color:#333;line-height:1.7;">
+                <b>• Avance del Día:</b> Reporte diario de avances y mermas por área con calendario histórico.
+                <br><b>• Avance Semanal:</b> Gráfica de barras de productividad semanal por proceso.
+                <br><b>• Trazabilidad:</b> Buscador multifiltrado para auditar transacciones.
+                <br><b>• Calidad (Rechazos):</b> Análisis de motivos de scrap, tarjetas de merma por área y selector de descargas detalladas.
+            </p>""",
+            unsafe_allow_html=True,
+        )
+    with tab_m3:
+        st.markdown(
+            f"""
+            <p style="font-family:Questrial,sans-serif;font-size:14px;color:#333;line-height:1.7;">
+                <b>• Avances por Área:</b> Registro ágil de piezas buenas, scrap por pieza y re-cortes (reposiciones) de piezas dañadas.
+                <br><b>• Correcciones:</b> Data Editor bidireccional para modificar errores de captura.
+            </p>""",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        f"""
+        <h3 style="font-family:Montserrat,sans-serif;color:{RED};font-size:17px;margin-top:20px;">
+            ⚙️ 3. Procesos Críticos de Operación
+        </h3>""",
+        unsafe_allow_html=True,
+    )
+    
+    with st.expander("📥 ¿Cómo cargar y configurar una nueva Orden de Fabricación (OF)?"):
+        st.markdown(
+            """
+            1. En la barra lateral izquierda, presione el botón **Limpiar Registros / Nueva OF** para reiniciar variables.
+            2. Vaya al **1. DASHBOARD PRINCIPAL**, use el cargador de archivos y suba el reporte Excel de planeación.
+            3. El sistema estructurará la OF, los nidos y las piezas en la base de datos de manera automatizada.
+            """
+        )
+        
+    with st.expander("📉 Gestión de Calidad, Scrap y Reposiciones (Re-cuts)"):
+        st.markdown(
+            """
+            1. Si se daña una pieza, en **Avances por Área** capture la merma en la columna **Rechazos** indicando el motivo.
+            2. Esto la descontará del WIP de esa área y alimentará el gráfico de Scrap.
+            3. Para reponerla, el operador de Corte activa la casilla **Registrar Reposiciones / Re-cuts** e ingresa la cantidad re-cortada.
+            4. Al registrar, la pieza vuelve a entrar al WIP normal desde el principio del flujo.
+            """
+        )
+
+    st.markdown(
+        f"""
+        <h3 style="font-family:Montserrat,sans-serif;color:{RED};font-size:17px;margin-top:20px;">
+            📥 Descarga del Manual del Sistema
+        </h3>""",
+        unsafe_allow_html=True,
+    )
+    
+    # Intentar cargar manual PDF
+    manual_path = os.path.join(os.path.dirname(__file__), "..", "assets", "Manual_Sistema.pdf")
+    if os.path.exists(manual_path):
+        with open(manual_path, "rb") as f:
+            pdf_bytes = f.read()
+        st.download_button(
+            label="📥 Descargar Manual del Sistema en PDF",
+            data=pdf_bytes,
+            file_name="Manual_Usuario_SIGRAMA.pdf",
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True
+        )
+    else:
+        st.warning("⚠️ El archivo PDF formal del manual de operación no se encuentra en el directorio /assets. Contacta a sistemas.")
+
+
 # ─────────────────────────────────────────────
 #  MAIN VIEW
 # ─────────────────────────────────────────────
@@ -377,18 +530,19 @@ def view_manufactura():
     st.markdown(
         f"""
         <h1 style="font-family:Montserrat,sans-serif;color:{BLACK};margin-bottom:4px;">
-            🏭 MANUFACTURA INTELIGENTE
+            🏭 MANUFACTURA INTELIGENTE Y MANUAL DEL SISTEMA
         </h1>
         <p style="font-family:Questrial,sans-serif;color:#666;font-size:14px;margin-bottom:20px;">
-            Industria 4.0 · Digital Twin · Stack Tecnológico · Beneficios Estratégicos
+            Industria 4.0 · Digital Twin · Stack Tecnológico · Manual de Operación
         </p>""",
         unsafe_allow_html=True,
     )
 
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "🏭 Justificación Industria 4.0",
         "🚀 Beneficios Estratégicos",
         "⚙️ Stack Tecnológico",
+        "📖 Manual de Operación del Sistema",
     ])
 
     with tab1:
@@ -399,3 +553,6 @@ def view_manufactura():
 
     with tab3:
         _tab_stack()
+
+    with tab4:
+        _tab_manual()
