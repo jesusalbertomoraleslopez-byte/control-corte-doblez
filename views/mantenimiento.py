@@ -207,6 +207,88 @@ def view_mantenimiento():
                     conn.close()
                     
     st.markdown("---")
+    st.header("📅 Redistribuir Fechas de Avances (Simulación Histórica)")
+    st.markdown(
+        """
+        Si cargaste datos históricos pero todos los avances quedaron registrados con la fecha de hoy, puedes redistribuir 
+        los avances y rechazos de forma uniforme a lo largo de un rango de fechas de producción.
+        Esto corregirá los gráficos de tendencia de producción diaria.
+        """
+    )
+    
+    # Obtener todas las OFs
+    conn = get_connection()
+    df_ofs_dist = pd.read_sql_query("SELECT of_number FROM ordenes ORDER BY of_number ASC", conn)
+    conn.close()
+    
+    if df_ofs_dist.empty:
+        st.info("ℹ️ No hay Órdenes de Fabricación cargadas en el sistema.")
+    else:
+        col_dist_of, col_dist_dates = st.columns([1, 2])
+        with col_dist_of:
+            of_to_dist = st.selectbox("Selecciona OF a redistribuir:", ["Todas"] + df_ofs_dist["of_number"].tolist(), key="selectbox_dist_of")
+            
+        with col_dist_dates:
+            default_dates = ["2026-06-30", "2026-07-01", "2026-07-02", "2026-07-03", "2026-07-06", "2026-07-07", "2026-07-08"]
+            selected_dates = st.multiselect(
+                "Selecciona las fechas de producción para distribuir:",
+                default_dates,
+                default=default_dates,
+                key="multiselect_dist_dates"
+            )
+            
+        if not selected_dates:
+            st.warning("⚠️ Debes seleccionar al menos una fecha para la distribución.")
+        else:
+            if st.button("📅 Redistribuir Fechas de Producción", type="primary", use_container_width=True):
+                conn = get_connection()
+                c = conn.cursor()
+                try:
+                    # Determinar condición de filtrado
+                    query_av = "SELECT id, timestamp FROM avances"
+                    query_rec = "SELECT id, timestamp FROM rechazos"
+                    params = []
+                    if of_to_dist != "Todas":
+                        query_av += " WHERE of_number = ?"
+                        query_rec += " WHERE of_number = ?"
+                        params = [of_to_dist]
+                        
+                    c.execute(query_av, params)
+                    av_rows = c.fetchall()
+                    
+                    num_dates = len(selected_dates)
+                    
+                    # Actualizar avances
+                    for idx, (av_id, old_ts) in enumerate(av_rows):
+                        date_str = selected_dates[idx % num_dates]
+                        try:
+                            old_time = old_ts.split(" ")[1] if " " in old_ts else "12:00:00"
+                        except Exception:
+                            old_time = "12:00:00"
+                        new_ts = f"{date_str} {old_time}"
+                        c.execute("UPDATE avances SET timestamp = ? WHERE id = ?", (new_ts, av_id))
+                        
+                    # Actualizar rechazos
+                    c.execute(query_rec, params)
+                    rec_rows = c.fetchall()
+                    for idx, (rec_id, old_ts) in enumerate(rec_rows):
+                        date_str = selected_dates[idx % num_dates]
+                        try:
+                            old_time = old_ts.split(" ")[1] if " " in old_ts else "12:00:00"
+                        except Exception:
+                            old_time = "12:00:00"
+                        new_ts = f"{date_str} {old_time}"
+                        c.execute("UPDATE rechazos SET timestamp = ? WHERE id = ?", (new_ts, rec_id))
+                        
+                    conn.commit()
+                    st.success(f"✅ ¡Fechas redistribuidas con éxito para {len(av_rows)} avances y {len(rec_rows)} rechazos!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al redistribuir fechas: {e}")
+                finally:
+                    conn.close()
+                    
+    st.markdown("---")
     
     col_reset, col_plans, col_delete = st.columns(3)
     
