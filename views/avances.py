@@ -254,8 +254,12 @@ def view_avances():
                 nido_seleccionado = df_nidos_list.iloc[selected_rows[0]]['Nido']
 
     if is_ingenieria:
-        st.markdown(f"### 📋 Números de Parte de la OF: **{of_number}**")
-        st.markdown("👇 **Para INGENIERÍA, marca las partes que ya has terminado de diseñar/programar.**")
+        # Calcular total de piezas requeridas por número de parte
+        df_plan_piezas = df_todas.copy()
+        df_plan_piezas['hojas'] = pd.to_numeric(df_plan_piezas['hojas'], errors='coerce').fillna(1).astype(int)
+        df_plan_piezas['cantidad'] = pd.to_numeric(df_plan_piezas['cantidad'], errors='coerce').fillna(0).astype(int)
+        df_plan_piezas['total_req'] = df_plan_piezas['cantidad'] * df_plan_piezas['hojas']
+        df_sum_req = df_plan_piezas.groupby(['of_number', 'no_pieza'])['total_req'].sum().reset_index()
         
         # Unique parts
         df_partes = df_todas.drop_duplicates(subset=['of_number', 'no_pieza']).copy()
@@ -271,9 +275,39 @@ def view_avances():
         terminadas = [row[0] for row in c.fetchall()]
         conn.close()
         
-        # Create a df for the editor
+        # Create df_edit
         df_edit = df_partes[['of_number', 'no_pieza', 'nombre_pieza']].copy()
         df_edit['Diseñada'] = df_edit.apply(lambda row: f"{row['of_number']}-{row['no_pieza']}" in terminadas, axis=1)
+        
+        # Unir para obtener la cantidad planeada
+        df_edit = df_edit.merge(df_sum_req, on=['of_number', 'no_pieza'], how='left')
+        df_edit['total_req'] = df_edit['total_req'].fillna(0).astype(int)
+        
+        # Calcular WIP de Ingeniería
+        df_pendientes = df_edit[df_edit['Diseñada'] == False].copy()
+        total_wip_ingenieria = df_pendientes['total_req'].sum()
+        
+        # Mostrar tarjeta WIP
+        st.markdown(
+            f"""
+            <div style="background-color: #f8f9fa; border-left: 8px solid #EC2024; padding: 25px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <h3 style="margin: 0; color: #555; font-size: 1.4rem; text-transform: uppercase;">Sumatoria WIP - Ingeniería (Pendiente de Diseñar)</h3>
+                <div style="display: flex; align-items: baseline; gap: 10px;">
+                    <h1 style="margin: 0; color: #EC2024; font-size: 4.5rem; font-weight: 900; line-height: 1;">{int(total_wip_ingenieria)}</h1>
+                    <span style="font-size: 1.8rem; font-weight: bold; color: #666;">piezas pendientes de diseñar</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True
+        )
+        
+        # Mostrar tabla de pendientes de Diseñar
+        if not df_pendientes.empty:
+            df_pend_show = df_pendientes.rename(columns={'no_pieza': 'NP', 'total_req': 'CANTIDAD'})
+            st.markdown("### ⏳ Piezas Pendientes de Diseñar")
+            st.dataframe(df_pend_show[['NP', 'CANTIDAD']], use_container_width=True, hide_index=True)
+            
+        st.markdown(f"### 📋 Números de Parte de la OF: **{of_number}**")
+        st.markdown("👇 **Para INGENIERÍA, marca las partes que ya has terminado de diseñar/programar:**")
         
         edited_df = st.data_editor(
             df_edit,
@@ -281,8 +315,9 @@ def view_avances():
             hide_index=True,
             column_config={
                 "of_number": st.column_config.TextColumn("OF", disabled=True),
-                "no_pieza": st.column_config.TextColumn("No. Parte", disabled=True),
+                "no_pieza": st.column_config.TextColumn("No. Parte (NP)", disabled=True),
                 "nombre_pieza": st.column_config.TextColumn("Descripción", disabled=True),
+                "total_req": st.column_config.NumberColumn("Cantidad Planeada", disabled=True),
                 "Diseñada": st.column_config.CheckboxColumn("¿Terminada?")
             },
             height=250
@@ -295,11 +330,9 @@ def view_avances():
             if nuevas_terminadas.empty:
                 st.info("No hay partes nuevas por registrar.")
             else:
-                # save_avances_mixto already imported at top level
                 # Guardamos cada parte con nido='N/A' y cantidad=1
                 nuevas_terminadas["cantidad"] = 1
                 nuevas_terminadas["Terminadas"] = 1
-                # Llamamos save_avances_mixto pasando N/A
                 save_avances_mixto(of_number, "N/A", area_seleccionada, False, nuevas_terminadas, None, operador, maquina, None)
                 st.success(f"🎉 ¡{len(nuevas_terminadas)} partes marcadas como terminadas en Ingeniería!")
                 st.rerun()
