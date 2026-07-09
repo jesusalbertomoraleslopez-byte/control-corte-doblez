@@ -153,51 +153,69 @@ def view_avances():
                 'req_total': 'sum'
             }).reset_index()
             
-            # Consultar avances y rechazos en Corte
+            # Consultar scrap total (todas las áreas) y reposiciones ya hechas
             conn = get_connection()
             if of_number == "Todas":
-                df_av_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as cortadas FROM avances WHERE area='Corte' GROUP BY no_pieza", conn)
-                df_re_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as rechazadas FROM rechazos WHERE area='Corte' GROUP BY no_pieza", conn)
+                df_re_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as rechazadas FROM rechazos GROUP BY no_pieza", conn)
+                df_rep_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as repuestas FROM avances WHERE area='Corte' AND nido='REPOSICION' GROUP BY no_pieza", conn)
             else:
-                df_av_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as cortadas FROM avances WHERE of_number=? AND area='Corte' GROUP BY no_pieza", conn, params=(of_number,))
-                df_re_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as rechazadas FROM rechazos WHERE of_number=? AND area='Corte' GROUP BY no_pieza", conn, params=(of_number,))
+                df_re_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as rechazadas FROM rechazos WHERE of_number=? GROUP BY no_pieza", conn, params=(of_number,))
+                df_rep_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as repuestas FROM avances WHERE of_number=? AND area='Corte' AND nido='REPOSICION' GROUP BY no_pieza", conn, params=(of_number,))
             conn.close()
             
-            df_piezas_corte = df_piezas_corte.merge(df_av_c, on='no_pieza', how='left')
             df_piezas_corte = df_piezas_corte.merge(df_re_c, on='no_pieza', how='left')
-            df_piezas_corte['cortadas'] = df_piezas_corte['cortadas'].fillna(0).astype(int)
+            df_piezas_corte = df_piezas_corte.merge(df_rep_c, on='no_pieza', how='left')
             df_piezas_corte['rechazadas'] = df_piezas_corte['rechazadas'].fillna(0).astype(int)
-            df_piezas_corte['Re-cuts / Reposición'] = 0
+            df_piezas_corte['repuestas'] = df_piezas_corte['repuestas'].fillna(0).astype(int)
             
-            df_rep_edit = st.data_editor(
-                df_piezas_corte[['no_pieza', 'nombre_pieza', 'req_total', 'cortadas', 'rechazadas', 'Re-cuts / Reposición']],
-                column_config={
-                    "no_pieza": st.column_config.TextColumn("No. Parte", disabled=True),
-                    "nombre_pieza": st.column_config.TextColumn("Descripción", disabled=True),
-                    "req_total": st.column_config.NumberColumn("Planeadas", disabled=True),
-                    "cortadas": st.column_config.NumberColumn("Cortadas", disabled=True),
-                    "rechazadas": st.column_config.NumberColumn("Rechazadas (Scrap)", disabled=True),
-                    "Re-cuts / Reposición": st.column_config.NumberColumn("Cantidad a Reponer", min_value=0, step=1, disabled=False)
-                },
-                use_container_width=True,
-                hide_index=True,
-                key="editor_corte_reposiciones"
-            )
+            # Pendientes de reponer = Rechazadas - Repuestas
+            df_piezas_corte['Pendientes de Reponer'] = df_piezas_corte['rechazadas'] - df_piezas_corte['repuestas']
+            df_piezas_corte['Pendientes de Reponer'] = df_piezas_corte['Pendientes de Reponer'].apply(lambda x: max(0, x))
             
-            if st.button("✅ Registrar Reposiciones en Corte", type="primary", use_container_width=True):
-                if not operador.strip():
-                    st.error("⚠️ Por favor selecciona un Operador válido antes de guardar.")
-                    st.stop()
-                    
-                df_to_save = df_rep_edit[df_rep_edit['Re-cuts / Reposición'] > 0].copy()
-                if df_to_save.empty:
-                    st.warning("⚠️ No has capturado ninguna cantidad de reposición.")
-                else:
-                    df_to_save['Terminadas'] = df_to_save['Re-cuts / Reposición']
-                    # Guardar avance en Corte con nido='REPOSICION' y hoja=None
-                    save_avances_mixto(of_number, "REPOSICION", "Corte", False, df_to_save, None, operador, maquina, None)
-                    st.success("🎉 ¡Reposiciones registradas exitosamente en Corte!")
-                    st.rerun()
+            # Filtrar: solo mostrar piezas que tienen rechazos y que aún tienen pendientes de reponer
+            df_piezas_corte = df_piezas_corte[(df_piezas_corte['rechazadas'] > 0) & (df_piezas_corte['Pendientes de Reponer'] > 0)].copy()
+            
+            if df_piezas_corte.empty:
+                st.success("✅ ¡Excelente! No hay piezas con rechazos (Scrap) pendientes de reponer para esta OF.")
+            else:
+                df_piezas_corte['Re-cuts / Reposición'] = 0
+                
+                df_rep_edit = st.data_editor(
+                    df_piezas_corte[['no_pieza', 'nombre_pieza', 'req_total', 'rechazadas', 'repuestas', 'Pendientes de Reponer', 'Re-cuts / Reposición']],
+                    column_config={
+                        "no_pieza": st.column_config.TextColumn("No. Parte", disabled=True),
+                        "nombre_pieza": st.column_config.TextColumn("Descripción", disabled=True),
+                        "req_total": st.column_config.NumberColumn("Planeadas", disabled=True),
+                        "rechazadas": st.column_config.NumberColumn("Rechazadas (Scrap)", disabled=True),
+                        "repuestas": st.column_config.NumberColumn("Repuestas Previamente", disabled=True),
+                        "Pendientes de Reponer": st.column_config.NumberColumn("Pendientes de Reponer", disabled=True),
+                        "Re-cuts / Reposición": st.column_config.NumberColumn("Cantidad a Reponer", min_value=0, step=1, disabled=False)
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                    key="editor_corte_reposiciones"
+                )
+                
+                if st.button("✅ Registrar Reposiciones en Corte", type="primary", use_container_width=True):
+                    if not operador.strip():
+                        st.error("⚠️ Por favor selecciona un Operador válido antes de guardar.")
+                        st.stop()
+                        
+                    df_to_save = df_rep_edit[df_rep_edit['Re-cuts / Reposición'] > 0].copy()
+                    if df_to_save.empty:
+                        st.warning("⚠️ No has capturado ninguna cantidad de reposición.")
+                    else:
+                        # Validar el límite máximo
+                        sobrepasadas = df_to_save[df_to_save['Re-cuts / Reposición'] > df_to_save['Pendientes de Reponer']]
+                        if not sobrepasadas.empty:
+                            st.error("❌ No puedes reponer más piezas de las que fueron rechazadas. Revisa las cantidades capturadas.")
+                            st.stop()
+                            
+                        df_to_save['Terminadas'] = df_to_save['Re-cuts / Reposición']
+                        # Guardar avance en Corte con nido='REPOSICION' y hoja=None
+                        save_avances_mixto(of_number, "REPOSICION", "Corte", False, df_to_save, None, operador, maquina, None)
+                        st.success("🎉 ¡Reposiciones registradas exitosamente en Corte!")
+                        st.rerun()
         else:
             st.markdown("👇 **Selecciona un Nido de la tabla haciendo clic en la fila correspondiente:**")
             
