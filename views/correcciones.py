@@ -2,22 +2,22 @@ import streamlit as st
 import pandas as pd
 from utils.database import get_connection
 
-def get_registros(tabla, operador="Todos", area="Todas"):
+def get_registros(tabla, of_number, area, nido="Todos", no_pieza="Todas"):
     conn = get_connection()
-    query = f"SELECT id, of_number, nido, hoja, no_pieza, area, cantidad, operador, maquina, timestamp FROM {tabla} WHERE 1=1"
-    params = []
+    motivo_select = ", motivo" if tabla == "rechazos" else ""
+    query = f"SELECT id, of_number, nido, hoja, no_pieza, area, cantidad{motivo_select}, operador, maquina, timestamp FROM {tabla} WHERE of_number = ? AND area = ?"
+    params = [of_number, area]
     
-    if operador != "Todos":
-        query += " AND operador = ?"
-        params.append(operador)
+    if area == "Corte" and nido != "Todos":
+        query += " AND nido = ?"
+        params.append(nido)
+    elif area != "Corte" and no_pieza != "Todas":
+        query += " AND no_pieza = ?"
+        params.append(no_pieza)
         
-    if area != "Todas":
-        query += " AND area = ?"
-        params.append(area)
-        
-    query += " ORDER BY timestamp DESC LIMIT 500"
+    query += " ORDER BY timestamp DESC"
     
-    df = pd.read_sql_query(query, conn, params=tuple(params) if params else None)
+    df = pd.read_sql_query(query, conn, params=tuple(params))
     conn.close()
     return df
 
@@ -65,43 +65,101 @@ def update_registros(tabla, original_df, edited_df):
 
 def view_correcciones():
     st.markdown("## ✏️ Corrección de Avances y Rechazos")
-    st.markdown("Selecciona los registros ingresados por error y elimínalos, o edita su Cantidad, Operador y Máquina.")
+    st.markdown("Filtra los registros paso a paso, selecciona los ingresados por error y elimínalos, o edita sus campos directamente en la tabla.")
     
+    # ── FILTROS EN CASCADA ────────────────────────────────────────────
+    from views.avances import PROCESSES
+    
+    friendly_names = {
+        "Ingenieria": "Ingeniería",
+        "Corte": "Corte (Nidos)",
+        "Rebabeo": "Rebabeo",
+        "Doblez": "Doblez",
+        "Barrenado": "Barrenado",
+        "Pintura": "Pintura",
+        "Liberado": "Liberado",
+        "Empaque": "Empaque"
+    }
+    inv_friendly_names = {v: k for k, v in friendly_names.items()}
+    
+    col_f1, col_f2, col_f3 = st.columns(3)
+    
+    with col_f1:
+        sel_area_friendly = st.selectbox(
+            "1️⃣ Seleccionar Área / Proceso:", 
+            [friendly_names[p] for p in PROCESSES if p in friendly_names],
+            key="corr_area"
+        )
+        sel_area = inv_friendly_names[sel_area_friendly]
+        
+    # Paso 2: Cargar OFs que tengan movimientos en el área seleccionada
     conn = get_connection()
-    operadores_df = pd.read_sql_query("SELECT DISTINCT operador FROM avances UNION SELECT DISTINCT operador FROM rechazos", conn)
-    areas_df = pd.read_sql_query("SELECT DISTINCT area FROM avances UNION SELECT DISTINCT area FROM rechazos", conn)
+    df_ofs = pd.read_sql_query(
+        "SELECT DISTINCT of_number FROM avances WHERE area = ? UNION SELECT DISTINCT of_number FROM rechazos WHERE area = ?",
+        conn, params=(sel_area, sel_area)
+    )
     conn.close()
     
-    lista_operadores = ["Todos"] + [op for op in operadores_df['operador'].dropna().unique() if str(op).strip()]
-    lista_areas = ["Todas"] + [ar for ar in areas_df['area'].dropna().unique() if str(ar).strip()]
+    ofs_list = ["Selecciona una OF..."] + df_ofs["of_number"].dropna().tolist()
     
-    col1, col2 = st.columns(2)
-    with col1:
-        sel_operador = st.selectbox("👤 Filtrar por Operador:", lista_operadores, key="corr_op")
-    with col2:
-        sel_area = st.selectbox("🏭 Filtrar por Área:", lista_areas, key="corr_area")
+    with col_f2:
+        sel_of = st.selectbox(
+            "2️⃣ Seleccionar Orden de Fabricación (OF):", 
+            ofs_list,
+            key="corr_of"
+        )
+        
+    if sel_of == "Selecciona una OF...":
+        st.info("ℹ️ Por favor, selecciona una Orden de Fabricación (OF) para continuar.")
+        return
+        
+    # Paso 3: Seleccionar Nido (para Corte) o Pieza (para las demás áreas)
+    is_corte = (sel_area == "Corte")
+    conn = get_connection()
     
-    st.markdown("### 🟢 Avances Registrados (Últimos 500)")
-    df_av = get_registros("avances", sel_operador, sel_area)
+    if is_corte:
+        df_nidos = pd.read_sql_query(
+            "SELECT DISTINCT nido FROM avances WHERE area = 'Corte' AND of_number = ? UNION SELECT DISTINCT nido FROM rechazos WHERE area = 'Corte' AND of_number = ?",
+            conn, params=(sel_of, sel_of)
+        )
+        nidos_list = ["Todos"] + df_nidos["nido"].dropna().tolist()
+        with col_f3:
+            sel_nido = st.selectbox("3️⃣ Seleccionar Nido:", nidos_list, key="corr_nido")
+            sel_pieza = "Todas"
+    else:
+        df_piezas = pd.read_sql_query(
+            "SELECT DISTINCT no_pieza FROM avances WHERE area = ? AND of_number = ? UNION SELECT DISTINCT no_pieza FROM rechazos WHERE area = ? AND of_number = ?",
+            conn, params=(sel_area, sel_of, sel_area, sel_of)
+        )
+        piezas_list = ["Todas"] + df_piezas["no_pieza"].dropna().tolist()
+        with col_f3:
+            sel_pieza = st.selectbox("3️⃣ Seleccionar Número de Pieza:", piezas_list, key="corr_pieza")
+            sel_nido = "Todos"
+            
+    conn.close()
+    
+    # ── TABLA DE AVANCES ──────────────────────────────────────────────
+    st.markdown("### 🟢 Avances Registrados")
+    df_av = get_registros("avances", sel_of, sel_area, sel_nido, sel_pieza)
+    
+    column_config = {
+        "id": None,
+        "🗑️ Eliminar": st.column_config.CheckboxColumn("Seleccionar", help="Marca esta casilla para eliminar el registro", default=False),
+        "of_number": st.column_config.TextColumn("OF", disabled=True),
+        "nido": st.column_config.TextColumn("Nido", disabled=True),
+        "hoja": st.column_config.NumberColumn("Hoja", disabled=True),
+        "no_pieza": st.column_config.TextColumn("No. Pieza", disabled=True),
+        "area": st.column_config.TextColumn("Área", disabled=True),
+        "cantidad": st.column_config.NumberColumn("Cantidad", disabled=False),
+        "operador": st.column_config.TextColumn("Operador", disabled=False),
+        "maquina": st.column_config.TextColumn("Máquina", disabled=False),
+        "timestamp": st.column_config.DatetimeColumn("Fecha/Hora", disabled=True, format="YYYY-MM-DD HH:mm:ss")
+    }
     
     if df_av.empty:
-        st.info("No hay avances registrados para estos filtros.")
+        st.info("No se encontraron avances registrados para esta selección.")
     else:
         df_av.insert(0, "🗑️ Eliminar", False)
-        
-        column_config = {
-            "id": None,
-            "🗑️ Eliminar": st.column_config.CheckboxColumn("Seleccionar", help="Marca esta casilla para eliminar el registro", default=False),
-            "of_number": st.column_config.TextColumn("OF", disabled=True),
-            "nido": st.column_config.TextColumn("Nido", disabled=True),
-            "hoja": st.column_config.NumberColumn("Hoja", disabled=True),
-            "no_pieza": st.column_config.TextColumn("No. Pieza", disabled=True),
-            "area": st.column_config.TextColumn("Área", disabled=True),
-            "cantidad": st.column_config.NumberColumn("Cantidad", disabled=False),
-            "operador": st.column_config.TextColumn("Operador", disabled=False),
-            "maquina": st.column_config.TextColumn("Máquina", disabled=False),
-            "timestamp": st.column_config.DatetimeColumn("Fecha/Hora", disabled=True, format="YYYY-MM-DD HH:mm:ss")
-        }
         
         edited_av = st.data_editor(
             df_av,
@@ -130,35 +188,21 @@ def view_correcciones():
                     st.rerun()
                 else:
                     st.info("No detecté ningún cambio.")
-
-    st.markdown("### 🔴 Rechazos Registrados (Últimos 500)")
-    # Obtener columna motivo para rechazos
-    conn = get_connection()
-    query_r = "SELECT id, of_number, nido, hoja, no_pieza, area, cantidad, motivo, operador, maquina, timestamp FROM rechazos WHERE 1=1"
-    params_r = []
+                    
+    # ── TABLA DE RECHAZOS ─────────────────────────────────────────────
+    st.markdown("### 🔴 Rechazos Registrados")
+    df_rech = get_registros("rechazos", sel_of, sel_area, sel_nido, sel_pieza)
     
-    if sel_operador != "Todos":
-        query_r += " AND operador = ?"
-        params_r.append(sel_operador)
-        
-    if sel_area != "Todas":
-        query_r += " AND area = ?"
-        params_r.append(sel_area)
-        
-    query_r += " ORDER BY timestamp DESC LIMIT 500"
-    df_rech_full = pd.read_sql_query(query_r, conn, params=tuple(params_r) if params_r else None)
-    conn.close()
-    
-    if df_rech_full.empty:
-        st.info("No hay rechazos registrados para estos filtros.")
+    if df_rech.empty:
+        st.info("No se encontraron rechazos registrados para esta selección.")
     else:
-        df_rech_full.insert(0, "🗑️ Eliminar", False)
+        df_rech.insert(0, "🗑️ Eliminar", False)
         
         column_config_r = column_config.copy()
         column_config_r["motivo"] = st.column_config.TextColumn("Motivo", disabled=True)
         
         edited_rech = st.data_editor(
-            df_rech_full,
+            df_rech,
             column_config=column_config_r,
             hide_index=True,
             use_container_width=True,
@@ -178,7 +222,7 @@ def view_correcciones():
                     st.warning("Selecciona al menos un rechazo para eliminar.")
         with col_r2:
             if st.button("💾 Guardar Cambios Editados", key="save_re"):
-                upd = update_registros("rechazos", df_rech_full, edited_rech)
+                upd = update_registros("rechazos", df_rech, edited_rech)
                 if upd > 0:
                     st.success(f"✅ Se actualizaron {upd} rechazo(s) correctamente.")
                     st.rerun()
