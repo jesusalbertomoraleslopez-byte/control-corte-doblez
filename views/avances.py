@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from utils.database import get_active_of, get_todas_piezas, get_avances_nido, save_avances_mixto, get_total_rechazos, get_connection, get_movimientos_area, get_all_ofs, get_personal_prenomina
+from utils.database import get_active_of, get_todas_piezas, get_avances_nido, save_avances_mixto, get_total_rechazos, get_connection, get_movimientos_area, get_all_ofs, get_personal_prenomina, get_operadores_por_area
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode, JsCode
 
 # Constantes de diseño
@@ -82,29 +82,8 @@ def view_avances():
         maquina = st.selectbox("3️⃣ Máquina", lista_maquinas, key="avance_maquina")
         
     with col_f6:
-        df_pers = get_personal_prenomina()
-        if not df_pers.empty:
-            map_areas = {
-                "Corte": ["✂️ Corte Laser"],
-                "Ingenieria": ["⚙️ Ingeniería"],
-                "Doblez": ["📐 Doblez"],
-                "Pintura": ["🎨 Pintura"],
-                "Empaque": ["📦 Embarque"],
-                "Liberado": ["📦 Embarque", "👑 Dirección"],
-                "Barrenado": ["📐 Doblez", "✂️ Corte Laser"],
-                "Rebabeo": ["✂️ Corte Laser", "📐 Doblez"]
-            }
-            df_pers['nombre'] = df_pers['nombre'].astype(str).str.strip().str.upper()
-            df_pers['area'] = df_pers['area'].astype(str).str.strip()
-            
-            target_areas = map_areas.get(area_seleccionada, [])
-            ops_list = df_pers[df_pers['area'].isin(target_areas)]['nombre'].dropna().unique().tolist()
-            ops_list.sort()
-            
-            if not ops_list:
-                ops_list = df_pers['nombre'].dropna().unique().tolist()
-                ops_list.sort()
-                
+        ops_list = get_operadores_por_area(area_seleccionada)
+        if ops_list:
             operador = st.selectbox("4️⃣ Operador", ops_list, key="avance_operador")
         else:
             operador = st.text_input("4️⃣ Operador (Nombre o Nómina)", key="avance_operador")

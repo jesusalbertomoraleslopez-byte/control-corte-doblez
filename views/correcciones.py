@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from utils.database import get_connection, get_personal_prenomina
+from utils.database import get_connection, get_personal_prenomina, get_operadores_por_area
 
 def get_registros(tabla, of_number, area, nido="Todos", no_pieza="Todas"):
     conn = get_connection()
@@ -143,30 +143,7 @@ def view_correcciones():
     df_av = get_registros("avances", sel_of, sel_area, sel_nido, sel_pieza)
     
     # Cargar operadores de la prenomina filtrados por el área seleccionada
-    df_pers = get_personal_prenomina()
-    if not df_pers.empty:
-        map_areas = {
-            "Corte": ["✂️ Corte Laser"],
-            "Ingenieria": ["⚙️ Ingeniería"],
-            "Doblez": ["📐 Doblez"],
-            "Pintura": ["🎨 Pintura"],
-            "Empaque": ["📦 Embarque"],
-            "Liberado": ["📦 Embarque", "👑 Dirección"],
-            "Barrenado": ["📐 Doblez", "✂️ Corte Laser"],
-            "Rebabeo": ["✂️ Corte Laser", "📐 Doblez"]
-        }
-        df_pers['nombre'] = df_pers['nombre'].astype(str).str.strip().str.upper()
-        df_pers['area'] = df_pers['area'].astype(str).str.strip()
-        
-        target_areas = map_areas.get(sel_area, [])
-        ops_all = df_pers[df_pers['area'].isin(target_areas)]['nombre'].dropna().unique().tolist()
-        ops_all.sort()
-        
-        if not ops_all:
-            ops_all = df_pers['nombre'].dropna().unique().tolist()
-            ops_all.sort()
-    else:
-        ops_all = []
+    ops_all = get_operadores_por_area(sel_area)
         
     column_config = {
         "id": None,

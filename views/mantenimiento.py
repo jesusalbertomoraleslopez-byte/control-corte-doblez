@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-from utils.database import get_connection, clear_avances_rechazos, clear_plans_keep_catalog, clear_db
+from utils.database import get_connection, clear_avances_rechazos, clear_plans_keep_catalog, clear_db, get_personal_prenomina
 
 def get_stats():
     conn = get_connection()
@@ -219,6 +219,98 @@ def view_mantenimiento():
             except Exception as e:
                 st.error(f"Error al vaciar la base de datos: {e}")
 
+    st.header("👥 Áreas Autorizadas por Colaborador")
+    st.markdown(
+        """
+        Configura qué áreas de producción está autorizado a trabajar cada colaborador de la prenómina.
+        Esto filtrará dinámicamente la lista de operadores disponibles al momento de registrar un avance de producción.
+        """
+    )
+    
+    # Cargar todos los colaboradores de prenomina
+    df_pers = get_personal_prenomina()
+    if df_pers.empty:
+        st.warning("⚠️ No se pudo cargar el catálogo de personal de Prenómina.")
+    else:
+        # Limpieza de datos
+        df_pers['nombre'] = df_pers['nombre'].astype(str).str.strip().str.upper()
+        df_pers['area'] = df_pers['area'].astype(str).str.strip()
+        
+        # Eliminar duplicados o registros nulos
+        df_pers = df_pers[df_pers['nombre'].notna() & (df_pers['nombre'] != 'NAN') & (df_pers['nombre'] != '')].drop_duplicates(subset=['nombre'])
+        
+        # Cargar asignaciones actuales en DB
+        conn_pers = get_connection()
+        try:
+            df_saved = pd.read_sql_query("SELECT * FROM personal_areas", conn_pers)
+        except Exception:
+            # Si no existe la tabla aún, crearla
+            c_temp = conn_pers.cursor()
+            c_temp.execute("CREATE TABLE IF NOT EXISTS personal_areas (operador_nombre TEXT NOT NULL, area TEXT NOT NULL, PRIMARY KEY (operador_nombre, area))")
+            conn_pers.commit()
+            df_saved = pd.DataFrame(columns=["operador_nombre", "area"])
+        conn_pers.close()
+        
+        # Construir matriz de checkboxes
+        matrix_rows = []
+        app_areas = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque", "Ingenieria"]
+        
+        for _, r_pers in df_pers.iterrows():
+            nom = r_pers['nombre']
+            dpto = r_pers['area']
+            
+            row_dict = {
+                "Colaborador": nom,
+                "Departamento": dpto
+            }
+            
+            for a_name in app_areas:
+                # Verificar si ya existe esta asignación en la base de datos
+                is_assigned = not df_saved[(df_saved['operador_nombre'] == nom) & (df_saved['area'] == a_name)].empty
+                row_dict[a_name] = is_assigned
+                
+            matrix_rows.append(row_dict)
+            
+        df_matrix = pd.DataFrame(matrix_rows)
+        
+        # Definir configuracion de columnas del data_editor
+        col_configs = {
+            "Colaborador": st.column_config.TextColumn("Colaborador", disabled=True),
+            "Departamento": st.column_config.TextColumn("Dpto. Prenómina", disabled=True),
+        }
+        for a_name in app_areas:
+            col_configs[a_name] = st.column_config.CheckboxColumn(a_name, default=False)
+            
+        edited_matrix = st.data_editor(
+            df_matrix,
+            column_config=col_configs,
+            use_container_width=True,
+            hide_index=True,
+            key="editor_matriz_personal"
+        )
+        
+        # Botón para guardar permisos
+        if st.button("💾 Guardar Autorizaciones de Personal", type="primary", use_container_width=True):
+            conn_save = get_connection()
+            c_save = conn_save.cursor()
+            try:
+                c_save.execute("DELETE FROM personal_areas")
+                for _, r_mat in edited_matrix.iterrows():
+                    op_name = r_mat['Colaborador']
+                    for a_name in app_areas:
+                        if r_mat[a_name]:
+                            c_save.execute(
+                                "INSERT INTO personal_areas (operador_nombre, area) VALUES (?, ?)",
+                                (op_name, a_name)
+                            )
+                conn_save.commit()
+                st.success("✅ ¡Permisos y autorizaciones de personal guardados con éxito!")
+                st.rerun()
+            except Exception as err:
+                st.error(f"Error al guardar permisos: {err}")
+            finally:
+                conn_save.close()
+                
     st.markdown("---")
     
     # --- RESPALDO DEL CATALOGO ---

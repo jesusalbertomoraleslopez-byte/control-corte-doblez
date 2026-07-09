@@ -100,6 +100,15 @@ def init_db():
         except sqlite3.OperationalError:
             pass  # La columna ya existe
             
+    # 6. Tabla de Áreas de Personal
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS personal_areas (
+            operador_nombre TEXT NOT NULL,
+            area TEXT NOT NULL,
+            PRIMARY KEY (operador_nombre, area)
+        )
+    ''')
+            
     # --- Parche de Emergencia: Recuperar avance perdido de Hoja 25 de OF-00002 N01 ---
     try:
         cursor.execute("SELECT count(*) FROM avances WHERE of_number = 'OF-00002' AND nido = 'N01' AND area = 'Corte' AND hoja = 25")
@@ -127,6 +136,12 @@ def init_db():
                 )
     except Exception as e:
         pass  # Evitar que falle el inicio del sistema
+
+    # Sincronizar catálogo de prenomina con áreas de personal
+    try:
+        check_and_seed_personal_areas(cursor)
+    except Exception as e:
+        pass
             
     conn.commit()
     conn.close()
@@ -553,3 +568,60 @@ def get_personal_prenomina():
         return df
     except Exception as e:
         return pd.DataFrame(columns=["id_empleado", "nombre", "area"])
+
+def check_and_seed_personal_areas(cursor):
+    """Sincroniza el catálogo de prenomina con personal_areas en la base de datos local."""
+    df_pers = get_personal_prenomina()
+    if df_pers.empty:
+        return
+        
+    # Obtener qué operadores ya tienen registros de áreas configurados
+    cursor.execute("SELECT DISTINCT operador_nombre FROM personal_areas")
+    existing_ops = {row[0] for row in cursor.fetchall()}
+    
+    # Mapeo predeterminado de áreas de Prenómina a las de nuestra App
+    default_mapping = {
+        "✂️ Corte Laser": ["Corte", "Rebabeo", "Barrenado"],
+        "📐 Doblez": ["Doblez", "Rebabeo", "Barrenado"],
+        "🎨 Pintura": ["Pintura"],
+        "⚙️ Ingeniería": ["Ingenieria"],
+        "📦 Embarque": ["Empaque", "Liberado"],
+        "👑 Dirección": ["Liberado"]
+    }
+    
+    for _, row in df_pers.iterrows():
+        nombre = str(row['nombre']).strip().upper()
+        area_prenomina = str(row['area']).strip()
+        
+        if nombre and nombre not in existing_ops and nombre != 'NAN':
+            # Seeding de áreas por defecto
+            areas_to_assign = default_mapping.get(area_prenomina, [])
+            for area in areas_to_assign:
+                try:
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO personal_areas (operador_nombre, area) VALUES (?, ?)",
+                        (nombre, area)
+                    )
+                except Exception:
+                    pass
+
+def get_operadores_por_area(area):
+    """Devuelve la lista de nombres de operadores autorizados para un área."""
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute("CREATE TABLE IF NOT EXISTS personal_areas (operador_nombre TEXT NOT NULL, area TEXT NOT NULL, PRIMARY KEY (operador_nombre, area))")
+        c.execute("SELECT DISTINCT operador_nombre FROM personal_areas WHERE area=?", (area,))
+        ops = [row[0] for row in c.fetchall()]
+    except Exception:
+        ops = []
+    conn.close()
+    ops.sort()
+    
+    # Si está vacía, hacer fallback a todos los de prenomina
+    if not ops:
+        df_pers = get_personal_prenomina()
+        if not df_pers.empty:
+            ops = df_pers['nombre'].astype(str).str.strip().str.upper().dropna().unique().tolist()
+            ops.sort()
+    return ops
