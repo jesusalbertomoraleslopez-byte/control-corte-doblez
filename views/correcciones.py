@@ -142,11 +142,33 @@ def view_correcciones():
     st.markdown("### 🟢 Avances Registrados")
     df_av = get_registros("avances", sel_of, sel_area, sel_nido, sel_pieza)
     
-    # Cargar todos los nombres de empleados de prenomina para usar en el editor
+    # Cargar operadores de la prenomina filtrados por el área seleccionada
     df_pers = get_personal_prenomina()
     if not df_pers.empty:
-        ops_all = df_pers['nombre'].astype(str).str.strip().str.upper().dropna().unique().tolist()
-        ops_all.sort()
+        map_areas = {
+            "Corte": ["✂️ Corte Laser"],
+            "Ingenieria": ["⚙️ Ingeniería"],
+            "Doblez": ["📐 Doblez"],
+            "Pintura": ["🎨 Pintura"],
+            "Empaque": ["📦 Embarque"],
+            "Liberado": ["📦 Embarque", "👑 Dirección"],
+            "Barrenado": ["📐 Doblez", "✂️ Corte Laser"],
+            "Rebabeo": ["✂️ Corte Laser", "📐 Doblez"]
+        }
+        df_pers['nombre'] = df_pers['nombre'].astype(str).str.strip().str.upper()
+        df_pers['area'] = df_pers['area'].astype(str).str.strip()
+        
+        target_areas = map_areas.get(sel_area, [])
+        ops_area = df_pers[df_pers['area'].isin(target_areas)]['nombre'].dropna().unique().tolist()
+        ops_area.sort()
+        
+        ops_others = df_pers[~df_pers['area'].isin(target_areas)]['nombre'].dropna().unique().tolist()
+        ops_others.sort()
+        
+        if ops_area:
+            ops_all = ops_area + ["-- OTROS OPERADORES --"] + ops_others
+        else:
+            ops_all = ops_others
     else:
         ops_all = []
         
