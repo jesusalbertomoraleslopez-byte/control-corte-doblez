@@ -100,6 +100,34 @@ def init_db():
         except sqlite3.OperationalError:
             pass  # La columna ya existe
             
+    # --- Parche de Emergencia: Recuperar avance perdido de Hoja 25 de OF-00002 N01 ---
+    try:
+        cursor.execute("SELECT count(*) FROM avances WHERE of_number = 'OF-00002' AND nido = 'N01' AND area = 'Corte' AND hoja = 25")
+        exists = cursor.fetchone()[0] > 0
+        if not exists:
+            # Obtener operador y maquina de hoja 24 o 26 para ser consistentes
+            cursor.execute("SELECT operador, maquina, timestamp FROM avances WHERE of_number = 'OF-00002' AND nido = 'N01' AND area = 'Corte' AND hoja = 24 LIMIT 1")
+            row = cursor.fetchone()
+            if not row:
+                cursor.execute("SELECT operador, maquina, timestamp FROM avances WHERE of_number = 'OF-00002' AND nido = 'N01' AND area = 'Corte' AND hoja = 26 LIMIT 1")
+                row = cursor.fetchone()
+            
+            if row:
+                operador, maquina, timestamp = row
+            else:
+                operador, maquina, timestamp = "SISTEMA (CORRECCIÓN)", "Láser 1", "2026-07-09 18:45:00"
+                
+            # Buscar piezas que componen el nido N01 de OF-00002
+            cursor.execute("SELECT no_pieza, cantidad FROM piezas WHERE of_number = 'OF-00002' AND nido = 'N01'")
+            piezas = cursor.fetchall()
+            for no_pieza, cant in piezas:
+                cursor.execute(
+                    "INSERT INTO avances (of_number, nido, no_pieza, area, cantidad, operador, maquina, hoja, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("OF-00002", "N01", no_pieza, "Corte", cant, operador, maquina, 25, timestamp)
+                )
+    except Exception as e:
+        pass  # Evitar que falle el inicio del sistema
+            
     conn.commit()
     conn.close()
 
