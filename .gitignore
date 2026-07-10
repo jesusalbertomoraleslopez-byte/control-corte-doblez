@@ -10,9 +10,6 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Databases
-*.db
-sigrama.db
 
 # Streamlit local config (optional, but good to avoid credentials)
 .streamlit/secrets.toml
