@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from utils.database import get_connection, get_personal_prenomina, get_operadores_por_area
+from utils.database import get_connection, get_personal_prenomina, get_operadores_por_area, git_sync_db
 
 def get_registros(tabla, of_number, area, nido="Todos", no_pieza="Todas"):
     conn = get_connection()
@@ -46,6 +46,7 @@ def delete_registros(tabla, ids_to_delete):
         
     conn.commit()
     conn.close()
+    git_sync_db()
 
 def update_registros(tabla, original_df, edited_df):
     conn = get_connection()
@@ -60,6 +61,7 @@ def update_registros(tabla, original_df, edited_df):
             updates += 1
     if updates > 0:
         conn.commit()
+        git_sync_db()
     conn.close()
     return updates
 
@@ -174,12 +176,46 @@ def view_correcciones():
         
         ids_av = edited_av[edited_av["🗑️ Eliminar"]]["id"].tolist() if "🗑️ Eliminar" in edited_av else []
         
+        # --- Resumen de impacto antes de eliminar ---
+        if ids_av:
+            filas_sel = df_av[df_av["id"].isin(ids_av)]
+            # Detectar el área anterior para cada pieza seleccionada
+            conn_imp = get_connection()
+            area_anterior_map = {}
+            for _, row_imp in filas_sel.iterrows():
+                cur = conn_imp.cursor()
+                cur.execute(
+                    "SELECT ruta FROM piezas WHERE of_number=? AND no_pieza=? LIMIT 1",
+                    (row_imp["of_number"], row_imp["no_pieza"])
+                )
+                res = cur.fetchone()
+                if res and res[0]:
+                    procesos = [p.strip() for p in res[0].split(",")]
+                    if sel_area in procesos:
+                        idx_a = procesos.index(sel_area)
+                        area_ant = procesos[idx_a - 1] if idx_a > 0 else "Planeación"
+                    else:
+                        area_ant = "Planeación"
+                else:
+                    area_ant = "Planeación"
+                area_anterior_map[row_imp["no_pieza"]] = area_ant
+            conn_imp.close()
+
+            resumen_html = "<div style='background:#fff8e1;border-left:6px solid #FFC107;padding:14px;border-radius:8px;margin-bottom:12px'>"
+            resumen_html += "<b>⚠️ Impacto de la eliminación:</b> Las siguientes piezas <b>regresarán al WIP</b> del área indicada:<br><br>"
+            resumen_html += "<table style='width:100%;font-size:.9rem'><tr><th>No. Parte</th><th>Cantidad</th><th>Regresa a</th></tr>"
+            for _, row_imp in filas_sel.iterrows():
+                area_ret = area_anterior_map.get(row_imp["no_pieza"], "Planeación")
+                resumen_html += f"<tr><td>{row_imp['no_pieza']}</td><td>{row_imp['cantidad']}</td><td><b>{area_ret}</b></td></tr>"
+            resumen_html += "</table></div>"
+            st.markdown(resumen_html, unsafe_allow_html=True)
+
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
             if st.button("🚨 Eliminar Avances Seleccionados", type="primary"):
                 if ids_av:
                     delete_registros("avances", ids_av)
-                    st.success(f"✅ Se eliminaron {len(ids_av)} avance(s) correctamente.")
+                    st.success(f"✅ Se eliminaron {len(ids_av)} avance(s). El material regresó al WIP del área anterior.")
                     st.rerun()
                 else:
                     st.warning("Selecciona al menos un avance para eliminar.")
@@ -214,12 +250,23 @@ def view_correcciones():
         
         ids_rech = edited_rech[edited_rech["🗑️ Eliminar"]]["id"].tolist() if "🗑️ Eliminar" in edited_rech else []
         
+        # --- Resumen de impacto rechazos ---
+        if ids_rech:
+            filas_rech_sel = df_rech[df_rech["id"].isin(ids_rech)]
+            resumen_r_html = "<div style='background:#e8f5e9;border-left:6px solid #28a745;padding:14px;border-radius:8px;margin-bottom:12px'>"
+            resumen_r_html += "<b>✅ Impacto de la eliminación de rechazos:</b> Las piezas dejarán de contabilizarse como Scrap y el sistema las contará nuevamente como WIP disponible:<br><br>"
+            resumen_r_html += "<table style='width:100%;font-size:.9rem'><tr><th>No. Parte</th><th>Cantidad</th><th>Motivo cancelado</th></tr>"
+            for _, rr in filas_rech_sel.iterrows():
+                resumen_r_html += f"<tr><td>{rr['no_pieza']}</td><td>{rr['cantidad']}</td><td>{rr.get('motivo','')}</td></tr>"
+            resumen_r_html += "</table></div>"
+            st.markdown(resumen_r_html, unsafe_allow_html=True)
+
         col_r1, col_r2 = st.columns(2)
         with col_r1:
             if st.button("🚨 Eliminar Rechazos Seleccionados", type="primary"):
                 if ids_rech:
                     delete_registros("rechazos", ids_rech)
-                    st.success(f"✅ Se eliminaron {len(ids_rech)} rechazo(s) correctamente.")
+                    st.success(f"✅ Se eliminaron {len(ids_rech)} rechazo(s). Las piezas vuelven a estar disponibles en WIP.")
                     st.rerun()
                 else:
                     st.warning("Selecciona al menos un rechazo para eliminar.")

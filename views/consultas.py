@@ -4,6 +4,8 @@ import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import xml.etree.ElementTree as ET
+import io
 
 def get_connection():
     return sqlite3.connect("sigrama.db")
@@ -20,11 +22,12 @@ def convert_df(df):
 def view_consultas():
     st.title("2. CONSULTAS Y REPORTES")
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📅 Avance del Día", 
         "📊 Avance Semanal", 
         "🔍 Trazabilidad", 
-        "📉 Calidad (Rechazos)"
+        "📉 Calidad (Rechazos)",
+        "📦 Material Programado"
     ])
 
     # --- PESTAÑA 1: Avance del Día ---
@@ -334,3 +337,187 @@ def view_consultas():
                 mime='text/csv',
             )
 
+    # --- PESTAÑA 5: Material Programado ---
+    with tab5:
+        st.subheader("📦 Material Programado por Orden de Fabricación")
+        st.markdown("Consulta exactamente qué piezas y qué cantidades están planificadas en cada OF, nido y proceso.")
+
+        # ── Carga de datos planeados ──────────────────────────────────────
+        df_mat = fetch_data("""
+            SELECT
+                p.of_number        AS OF,
+                o.proyecto         AS Proyecto,
+                o.programador      AS Programador,
+                o.fecha            AS Fecha,
+                p.nido             AS Nido,
+                n.hojas            AS Hojas,
+                p.no_pieza         AS [No. Parte],
+                p.nombre_pieza     AS Descripción,
+                p.cantidad         AS [Cant/Hoja],
+                p.cantidad * n.hojas AS [Total Planeado],
+                p.ruta             AS Ruta
+            FROM piezas p
+            JOIN nidos   n ON p.of_number = n.of_number AND p.nido = n.nido
+            JOIN ordenes o ON p.of_number = o.of_number
+            ORDER BY p.of_number, p.nido, p.no_pieza
+        """)
+
+        if df_mat.empty:
+            st.warning("⚠️ No hay OFs cargadas en el sistema. Ve a Planeación para subir tu primer plan de producción.")
+        else:
+            # ── Filtros en cascada ────────────────────────────────────────
+            col_f1, col_f2, col_f3 = st.columns(3)
+
+            ofs_disponibles = sorted(df_mat["OF"].unique().tolist())
+            with col_f1:
+                sel_ofs_mat = st.multiselect(
+                    "🗂️ Filtrar por OF:",
+                    ["Todas"] + ofs_disponibles,
+                    default=["Todas"],
+                    key="mat_sel_of"
+                )
+
+            df_filt = df_mat.copy()
+            if sel_ofs_mat and "Todas" not in sel_ofs_mat:
+                df_filt = df_filt[df_filt["OF"].isin(sel_ofs_mat)]
+
+            nidos_disp = sorted(df_filt["Nido"].unique().tolist())
+            with col_f2:
+                sel_nidos_mat = st.multiselect(
+                    "📂 Filtrar por Nido:",
+                    ["Todos"] + nidos_disp,
+                    default=["Todos"],
+                    key="mat_sel_nido"
+                )
+
+            if sel_nidos_mat and "Todos" not in sel_nidos_mat:
+                df_filt = df_filt[df_filt["Nido"].isin(sel_nidos_mat)]
+
+            # Filtro por Proceso (busca en la columna Ruta)
+            all_procesos = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+            with col_f3:
+                sel_proceso_mat = st.selectbox(
+                    "⚙️ Filtrar piezas que pasan por:",
+                    ["Todos los procesos"] + all_procesos,
+                    key="mat_sel_proceso"
+                )
+
+            if sel_proceso_mat != "Todos los procesos":
+                df_filt = df_filt[df_filt["Ruta"].str.contains(sel_proceso_mat, na=False)]
+
+            # ── Tarjetas Resumen ──────────────────────────────────────────
+            total_piezas_unicas  = df_filt["No. Parte"].nunique()
+            total_unidades       = int(df_filt["Total Planeado"].sum())
+            total_nidos          = df_filt["Nido"].nunique()
+            total_of_sel         = df_filt["OF"].nunique()
+
+            c1, c2, c3, c4 = st.columns(4)
+            tarjeta_style = (
+                "background:#f8f9fa;border-top:5px solid {color};"
+                "padding:18px;border-radius:8px;text-align:center;"
+                "box-shadow:0 3px 6px rgba(0,0,0,.1);margin-bottom:12px"
+            )
+            for col, label, valor, color in [
+                (c1, "OFs Seleccionadas",  total_of_sel,          "#0056b3"),
+                (c2, "Nidos Programados",  total_nidos,           "#6f42c1"),
+                (c3, "No. Partes Únicos",  total_piezas_unicas,   "#28a745"),
+                (c4, "Total Unidades Plan",total_unidades,        "#EC2024"),
+            ]:
+                col.markdown(
+                    f'<div style="{tarjeta_style.format(color=color)}">'
+                    f'<p style="margin:0;font-size:.85rem;font-weight:bold;color:#555;text-transform:uppercase">{label}</p>'
+                    f'<h2 style="margin:4px 0 0;font-size:2.6rem;font-weight:900;color:{color}">{valor}</h2>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+            # ── Tabla principal ───────────────────────────────────────────
+            st.markdown("### 📋 Detalle de Material Programado")
+            st.dataframe(
+                df_filt,
+                use_container_width=True,
+                hide_index=True,
+                height=400,
+                column_config={
+                    "Total Planeado": st.column_config.NumberColumn("Total Planeado", format="%d pzas"),
+                    "Cant/Hoja":      st.column_config.NumberColumn("Cant/Hoja",      format="%d"),
+                    "Hojas":          st.column_config.NumberColumn("# Hojas",         format="%d"),
+                }
+            )
+
+            # ── Descarga CSV ──────────────────────────────────────────────
+            st.markdown("---")
+            col_dl1, col_dl2 = st.columns(2)
+
+            with col_dl1:
+                csv_mat = df_filt.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Descargar CSV",
+                    data=csv_mat,
+                    file_name="Material_Programado.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+            # ── Descarga XML ──────────────────────────────────────────────
+            with col_dl2:
+                def build_xml(df):
+                    root = ET.Element("PlanProduccion",
+                                      generado=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                      sistema="SIGRAMA")
+                    for of_num, grp_of in df.groupby("OF"):
+                        row0 = grp_of.iloc[0]
+                        of_el = ET.SubElement(root, "OrdenFabricacion",
+                                              numero=str(of_num),
+                                              proyecto=str(row0.get("Proyecto", "")),
+                                              programador=str(row0.get("Programador", "")),
+                                              fecha=str(row0.get("Fecha", "")))
+                        for nido_num, grp_nido in grp_of.groupby("Nido"):
+                            nido_el = ET.SubElement(of_el, "Nido",
+                                                    nombre=str(nido_num),
+                                                    hojas=str(grp_nido.iloc[0]["Hojas"]))
+                            for _, prow in grp_nido.iterrows():
+                                p_el = ET.SubElement(nido_el, "Pieza")
+                                ET.SubElement(p_el, "NoParte").text       = str(prow["No. Parte"])
+                                ET.SubElement(p_el, "Descripcion").text   = str(prow["Descripción"])
+                                ET.SubElement(p_el, "CantPorHoja").text   = str(prow["Cant/Hoja"])
+                                ET.SubElement(p_el, "TotalPlaneado").text = str(prow["Total Planeado"])
+                                ET.SubElement(p_el, "Ruta").text          = str(prow["Ruta"])
+                    ET.indent(root, space="  ")
+                    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+                xml_bytes = build_xml(df_filt)
+                st.download_button(
+                    label="📄 Descargar XML",
+                    data=xml_bytes,
+                    file_name="Material_Programado.xml",
+                    mime="application/xml",
+                    use_container_width=True,
+                    type="primary"
+                )
+
+            # ── Gráfica: Top 10 partes por unidades planeadas ─────────────
+            st.markdown("---")
+            st.markdown("### 📊 Top 10 Números de Parte por Unidades Planeadas")
+            df_top = (
+                df_filt.groupby(["No. Parte", "Descripción"])["Total Planeado"]
+                .sum().reset_index()
+                .sort_values("Total Planeado", ascending=False)
+                .head(10)
+            )
+            if not df_top.empty:
+                fig_top = px.bar(
+                    df_top, x="Total Planeado", y="No. Parte",
+                    orientation="h",
+                    text="Total Planeado",
+                    color="Total Planeado",
+                    color_continuous_scale="Blues",
+                    title="Top 10 partes con mayor volumen programado"
+                )
+                fig_top.update_traces(textposition="outside")
+                fig_top.update_layout(
+                    yaxis=dict(autorange="reversed"),
+                    height=400,
+                    showlegend=False
+                )
+                st.plotly_chart(fig_top, use_container_width=True)
