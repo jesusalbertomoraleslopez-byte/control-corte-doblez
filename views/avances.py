@@ -107,21 +107,39 @@ def view_avances():
     
     nido_seleccionado = "Seleccionar..."
     if is_corte:
-        # Calcular total de piezas en WIP para Corte
-        df_todas_copy = df_todas.copy()
-        df_todas_copy['hojas'] = pd.to_numeric(df_todas_copy['hojas'], errors='coerce').fillna(1).astype(int)
-        df_todas_copy['cantidad'] = pd.to_numeric(df_todas_copy['cantidad'], errors='coerce').fillna(0).astype(int)
-        df_todas_copy['total_req'] = df_todas_copy['cantidad'] * df_todas_copy['hojas']
-        total_planeadas = df_todas_copy['total_req'].sum()
-        
+        # Calcular WIP de Corte: solo contar piezas de nidos AUN NO TERMINADOS
+        # Un nido de Corte esta terminado si hojas_cortadas >= hojas_requeridas
         conn = get_connection()
+        c_wip = conn.cursor()
         if of_number == "Todas":
-            df_c = pd.read_sql_query("SELECT SUM(cantidad) as cortadas FROM avances WHERE area='Corte'", conn)
+            c_wip.execute("SELECT of_number, nido, hojas FROM nidos")
         else:
-            df_c = pd.read_sql_query("SELECT SUM(cantidad) as cortadas FROM avances WHERE of_number=? AND area='Corte'", conn, params=(of_number,))
+            c_wip.execute("SELECT of_number, nido, hojas FROM nidos WHERE of_number=?", (of_number,))
+        nidos_data = c_wip.fetchall()
+
+        total_wip_corte = 0
+        for (of_n, nido_n, hojas_req) in nidos_data:
+            hojas_req = int(hojas_req) if hojas_req else 1
+            c_wip.execute(
+                "SELECT COUNT(DISTINCT hoja) FROM avances WHERE of_number=? AND nido=? AND area='Corte'",
+                (of_n, nido_n)
+            )
+            hojas_cortadas = c_wip.fetchone()[0]
+            if hojas_cortadas < hojas_req:   # Nido aun pendiente
+                c_wip.execute(
+                    "SELECT SUM(p.cantidad * n.hojas) FROM piezas p "
+                    "JOIN nidos n ON p.of_number=n.of_number AND p.nido=n.nido "
+                    "WHERE p.of_number=? AND p.nido=?",
+                    (of_n, nido_n)
+                )
+                plan_nido = c_wip.fetchone()[0] or 0
+                c_wip.execute(
+                    "SELECT SUM(cantidad) FROM avances WHERE of_number=? AND nido=? AND area='Corte'",
+                    (of_n, nido_n)
+                )
+                avanzado_nido = c_wip.fetchone()[0] or 0
+                total_wip_corte += max(0, plan_nido - avanzado_nido)
         conn.close()
-        total_cortadas = df_c['cortadas'].iloc[0] or 0
-        total_wip_corte = max(0, total_planeadas - total_cortadas)
         
         st.markdown(
             f"""
@@ -219,23 +237,27 @@ def view_avances():
         else:
             st.markdown("👇 **Selecciona un Nido de la tabla haciendo clic en la fila correspondiente:**")
             
-            # Obtener el estado de los nidos para esta área
+            # Estado de cada nido: TERMINADO solo si hojas_cortadas >= hojas_requeridas (para Corte)
             conn = get_connection()
             c = conn.cursor()
             if of_number == "Todas":
-                c.execute("SELECT DISTINCT of_number || '-' || nido FROM avances WHERE area = ?", (area_seleccionada,))
-                terminados = [row[0] for row in c.fetchall()]
+                c.execute("SELECT n.of_number, n.nido, n.hojas, COUNT(DISTINCT a.hoja) as cortadas "
+                          "FROM nidos n LEFT JOIN avances a ON n.of_number=a.of_number AND n.nido=a.nido AND a.area='Corte' "
+                          "GROUP BY n.of_number, n.nido, n.hojas")
+                nido_status = {f"{r[0]} | {r[1]}": (r[3] >= r[2]) for r in c.fetchall()}
                 nidos_list_unique = (df_todas['of_number'] + ' | ' + df_todas['nido']).unique().tolist()
                 df_nidos_list = pd.DataFrame({"Nido": nidos_list_unique})
                 df_nidos_list["Estado"] = df_nidos_list["Nido"].apply(
-                    lambda x: "✅ Terminado" if x.replace(" | ", "-") in terminados else "⏳ Pendiente"
+                    lambda x: "✅ Terminado" if nido_status.get(x, False) else "⏳ Pendiente"
                 )
             else:
-                c.execute("SELECT DISTINCT nido FROM avances WHERE of_number = ? AND area = ?", (of_number, area_seleccionada))
-                terminados = [row[0] for row in c.fetchall()]
+                c.execute("SELECT n.nido, n.hojas, COUNT(DISTINCT a.hoja) as cortadas "
+                          "FROM nidos n LEFT JOIN avances a ON n.of_number=a.of_number AND n.nido=a.nido AND a.area='Corte' "
+                          "WHERE n.of_number=? GROUP BY n.nido, n.hojas", (of_number,))
+                nido_status = {r[0]: (r[2] >= r[1]) for r in c.fetchall()}
                 df_nidos_list = pd.DataFrame({"Nido": nidos_list})
                 df_nidos_list["Estado"] = df_nidos_list["Nido"].apply(
-                    lambda x: "✅ Terminado" if x in terminados else "⏳ Pendiente"
+                    lambda x: "✅ Terminado" if nido_status.get(x, False) else "⏳ Pendiente"
                 )
             conn.close()
             
