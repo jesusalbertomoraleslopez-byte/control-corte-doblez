@@ -549,3 +549,55 @@ def view_mantenimiento():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error al restaurar base de datos: {e}")
+
+    st.markdown("---")
+    st.header("📊 Historial de Respaldos y Cambios (GitHub)")
+    st.markdown(
+        """
+        Esta sección muestra los últimos registros de sincronización y cambios guardados en el repositorio de GitHub. 
+        Cada registro representa una versión respaldada de tu base de datos o actualizaciones del sistema.
+        """
+    )
+    
+    col_git_title, col_git_btn = st.columns([3, 1])
+    with col_git_btn:
+        if st.button("🔄 Actualizar Historial", key="refresh_git_commits", use_container_width=True):
+            st.rerun()
+            
+    import subprocess
+    try:
+        # Ejecutar comando git log para obtener los últimos 8 commits
+        result = subprocess.run(
+            ["git", "log", "-n", "8", "--date=format:%d/%m/%Y %H:%M:%S", "--pretty=format:%h|%ad|%an|%s"],
+            capture_output=True, text=True, check=True
+        )
+        lines = result.stdout.strip().split("\n")
+        commit_data = []
+        for line in lines:
+            if "|" in line:
+                h, dt, author, msg = line.split("|", 3)
+                commit_data.append({
+                    "Hash": h,
+                    "Fecha / Hora": dt,
+                    "Autor / Sistema": author,
+                    "Detalle / Mensaje": msg
+                })
+        
+        if commit_data:
+            df_commits = pd.DataFrame(commit_data)
+            st.dataframe(
+                df_commits,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Hash": st.column_config.TextColumn("ID Commit", width=100),
+                    "Fecha / Hora": st.column_config.TextColumn("Fecha / Hora", width=180),
+                    "Autor / Sistema": st.column_config.TextColumn("Autor / Emisor", width=150),
+                    "Detalle / Mensaje": st.column_config.TextColumn("Detalle / Respaldos", width=400),
+                }
+            )
+            st.info("💡 Los commits con el mensaje 'Auto-sync DB' son respaldos automáticos en tiempo real de tu base de datos.")
+        else:
+            st.info("No se encontró historial de cambios de Git.")
+    except Exception as err:
+        st.warning(f"No se pudo consultar el historial de GitHub: {err}")
