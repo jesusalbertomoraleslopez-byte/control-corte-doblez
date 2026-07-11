@@ -459,39 +459,167 @@ def view_consultas():
                     use_container_width=True,
                 )
 
-            # ── Descarga XML ──────────────────────────────────────────────
+            # ── Descarga XLSX ─────────────────────────────────────────────
             with col_dl2:
-                def build_xml(df):
-                    root = ET.Element("PlanProduccion",
-                                      generado=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                      sistema="SIGRAMA")
-                    for of_num, grp_of in df.groupby("OF"):
-                        row0 = grp_of.iloc[0]
-                        of_el = ET.SubElement(root, "OrdenFabricacion",
-                                              numero=str(of_num),
-                                              proyecto=str(row0.get("Proyecto", "")),
-                                              programador=str(row0.get("Programador", "")),
-                                              fecha=str(row0.get("Fecha", "")))
-                        for nido_num, grp_nido in grp_of.groupby("Nido"):
-                            nido_el = ET.SubElement(of_el, "Nido",
-                                                    nombre=str(nido_num),
-                                                    hojas=str(grp_nido.iloc[0]["Hojas"]))
-                            for _, prow in grp_nido.iterrows():
-                                p_el = ET.SubElement(nido_el, "Pieza")
-                                ET.SubElement(p_el, "NoParte").text       = str(prow["No. Parte"])
-                                ET.SubElement(p_el, "Descripcion").text   = str(prow["Descripción"])
-                                ET.SubElement(p_el, "CantPorHoja").text   = str(prow["Cant/Hoja"])
-                                ET.SubElement(p_el, "TotalPlaneado").text = str(prow["Total Planeado"])
-                                ET.SubElement(p_el, "Ruta").text          = str(prow["Ruta"])
-                    ET.indent(root, space="  ")
-                    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                def build_xlsx(df):
+                    import io
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                        wb = writer.book
 
-                xml_bytes = build_xml(df_filt)
+                        # ── Formatos corporativos ──────────────────────────
+                        fmt_header = wb.add_format({
+                            "bold": True, "font_name": "Arial", "font_size": 10,
+                            "font_color": "#FFFFFF", "bg_color": "#EC2024",
+                            "align": "center", "valign": "vcenter",
+                            "border": 1, "border_color": "#B0B0B0", "text_wrap": True
+                        })
+                        fmt_title = wb.add_format({
+                            "bold": True, "font_name": "Arial", "font_size": 14,
+                            "font_color": "#EC2024", "align": "left", "valign": "vcenter"
+                        })
+                        fmt_subtitle = wb.add_format({
+                            "font_name": "Arial", "font_size": 9,
+                            "font_color": "#555555", "align": "left"
+                        })
+                        fmt_cell = wb.add_format({
+                            "font_name": "Arial", "font_size": 9,
+                            "border": 1, "border_color": "#D3D3D3", "valign": "vcenter"
+                        })
+                        fmt_num = wb.add_format({
+                            "font_name": "Arial", "font_size": 9,
+                            "border": 1, "border_color": "#D3D3D3",
+                            "valign": "vcenter", "align": "right", "num_format": "#,##0"
+                        })
+                        fmt_alt = wb.add_format({
+                            "font_name": "Arial", "font_size": 9,
+                            "bg_color": "#FFF5F5", "border": 1,
+                            "border_color": "#D3D3D3", "valign": "vcenter"
+                        })
+                        fmt_num_alt = wb.add_format({
+                            "font_name": "Arial", "font_size": 9,
+                            "bg_color": "#FFF5F5", "border": 1,
+                            "border_color": "#D3D3D3", "valign": "vcenter",
+                            "align": "right", "num_format": "#,##0"
+                        })
+                        fmt_of_group = wb.add_format({
+                            "bold": True, "font_name": "Arial", "font_size": 10,
+                            "font_color": "#FFFFFF", "bg_color": "#1A1A2E",
+                            "border": 1, "border_color": "#B0B0B0", "valign": "vcenter"
+                        })
+                        fmt_nido_group = wb.add_format({
+                            "bold": True, "font_name": "Arial", "font_size": 9,
+                            "font_color": "#FFFFFF", "bg_color": "#6f42c1",
+                            "border": 1, "border_color": "#B0B0B0", "valign": "vcenter"
+                        })
+
+                        # ── Hoja 1: Detalle por OF / Nido / Pieza ─────────
+                        ws = wb.add_worksheet("Detalle por OF")
+                        ws.set_zoom(90)
+                        ws.hide_gridlines(2)
+                        ws.set_row(0, 30)
+                        ws.set_row(1, 18)
+                        ws.set_row(2, 18)
+
+                        ws.merge_range("A1:K1", "SIGRAMA — Reporte de Material Programado", fmt_title)
+                        ws.merge_range("A2:K2",
+                            f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}   |   OFs: {', '.join(df['OF'].unique())}",
+                            fmt_subtitle)
+                        ws.write("A3", "", fmt_subtitle)
+
+                        cols = ["OF", "Proyecto", "Programador", "Fecha", "Nido",
+                                "Hojas", "No. Parte", "Descripción", "Cant/Hoja",
+                                "Total Planeado", "Ruta"]
+                        col_widths = [12, 18, 18, 12, 8, 7, 18, 40, 10, 14, 45]
+
+                        start_row = 3
+                        for c_idx, (col_name, width) in enumerate(zip(cols, col_widths)):
+                            ws.write(start_row, c_idx, col_name, fmt_header)
+                            ws.set_column(c_idx, c_idx, width)
+
+                        data_row = start_row + 1
+                        prev_of = None
+                        prev_nido = None
+                        for _, row in df.sort_values(["OF", "Nido", "No. Parte"]).iterrows():
+                            alt = (data_row % 2 == 0)
+                            # Fila de agrupación por OF
+                            if row["OF"] != prev_of:
+                                ws.merge_range(data_row, 0, data_row, 10,
+                                               f"📁 Orden de Fabricación: {row['OF']}  —  {row['Proyecto']}", fmt_of_group)
+                                data_row += 1
+                                prev_of = row["OF"]
+                                prev_nido = None
+
+                            # Fila de agrupación por Nido
+                            if row["Nido"] != prev_nido:
+                                ws.merge_range(data_row, 0, data_row, 10,
+                                               f"   📂 Nido: {row['Nido']}   ({row['Hojas']} hoja(s))", fmt_nido_group)
+                                data_row += 1
+                                prev_nido = row["Nido"]
+
+                            vals = [
+                                row["OF"], row["Proyecto"], row["Programador"], str(row["Fecha"]),
+                                row["Nido"], row["Hojas"], row["No. Parte"], row["Descripción"],
+                                row["Cant/Hoja"], row["Total Planeado"], row["Ruta"]
+                            ]
+                            num_cols = {5, 8, 9}  # Hojas, Cant/Hoja, Total Planeado
+                            for c_idx, val in enumerate(vals):
+                                if c_idx in num_cols:
+                                    ws.write_number(data_row, c_idx, int(val), fmt_num_alt if alt else fmt_num)
+                                else:
+                                    ws.write(data_row, c_idx, val, fmt_alt if alt else fmt_cell)
+                            data_row += 1
+
+                        ws.freeze_panes(start_row + 1, 0)
+                        ws.autofilter(start_row, 0, data_row - 1, len(cols) - 1)
+
+                        # ── Hoja 2: Resumen por OF ─────────────────────────
+                        ws2 = wb.add_worksheet("Resumen por OF")
+                        ws2.hide_gridlines(2)
+                        ws2.set_row(0, 30)
+                        ws2.merge_range("A1:E1", "SIGRAMA — Resumen de Material por OF", fmt_title)
+
+                        res_cols = ["OF", "Proyecto", "Nidos", "No. Partes Únicos", "Total Planeado"]
+                        res_widths = [14, 22, 10, 20, 18]
+                        for c_idx, (cn, cw) in enumerate(zip(res_cols, res_widths)):
+                            ws2.write(2, c_idx, cn, fmt_header)
+                            ws2.set_column(c_idx, c_idx, cw)
+
+                        df_res = df.groupby(["OF", "Proyecto"]).agg(
+                            Nidos=("Nido", "nunique"),
+                            Partes=("No. Parte", "nunique"),
+                            Total=("Total Planeado", "sum")
+                        ).reset_index()
+
+                        for r_idx, rw in df_res.iterrows():
+                            alt = (r_idx % 2 == 0)
+                            ws2.write(3 + r_idx, 0, rw["OF"],         fmt_alt if alt else fmt_cell)
+                            ws2.write(3 + r_idx, 1, rw["Proyecto"],   fmt_alt if alt else fmt_cell)
+                            ws2.write_number(3 + r_idx, 2, int(rw["Nidos"]),  fmt_num_alt if alt else fmt_num)
+                            ws2.write_number(3 + r_idx, 3, int(rw["Partes"]), fmt_num_alt if alt else fmt_num)
+                            ws2.write_number(3 + r_idx, 4, int(rw["Total"]),  fmt_num_alt if alt else fmt_num)
+
+                        # Totales
+                        tot_row = 3 + len(df_res)
+                        fmt_tot = wb.add_format({
+                            "bold": True, "font_name": "Arial", "font_size": 9,
+                            "bg_color": "#EC2024", "font_color": "#FFFFFF",
+                            "border": 1, "align": "right", "num_format": "#,##0"
+                        })
+                        ws2.merge_range(tot_row, 0, tot_row, 3, "TOTAL GENERAL", wb.add_format({
+                            "bold": True, "font_name": "Arial", "bg_color": "#EC2024",
+                            "font_color": "#FFFFFF", "border": 1, "align": "right"
+                        }))
+                        ws2.write_number(tot_row, 4, int(df["Total Planeado"].sum()), fmt_tot)
+
+                    return output.getvalue()
+
+                xlsx_bytes = build_xlsx(df_filt)
                 st.download_button(
-                    label="📄 Descargar XML",
-                    data=xml_bytes,
-                    file_name="Material_Programado.xml",
-                    mime="application/xml",
+                    label="📊 Descargar Reporte XLSX",
+                    data=xlsx_bytes,
+                    file_name="Material_Programado_SIGRAMA.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     type="primary"
                 )
