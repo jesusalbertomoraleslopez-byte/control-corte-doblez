@@ -334,8 +334,19 @@ def view_planeacion():
 
     with tab_rutas:
         st.markdown("### 🛣️ Paso 2: Selección Dinámica de Procesos (Rutas)")
-        if active_of is not None:
-            of_number = active_of['of_number']
+        from utils.database import get_all_ofs
+        all_ofs_list = get_all_ofs()
+        if all_ofs_list:
+            default_idx = 0
+            if active_of is not None and active_of['of_number'] in all_ofs_list:
+                default_idx = all_ofs_list.index(active_of['of_number'])
+            
+            of_number = st.selectbox(
+                "🔍 Selecciona la Orden de Fabricación (OF) a configurar:",
+                all_ofs_list,
+                index=default_idx,
+                key="route_config_of_selector"
+            )
             df_todas = get_todas_piezas(of_number)
             
             if not df_todas.empty:
