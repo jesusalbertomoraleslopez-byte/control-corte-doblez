@@ -9,7 +9,7 @@ BLACK = "#111111"
 GRAY = "#D2D3D5"
 WHITE = "#FFFFFF"
 
-PROCESSES = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+PROCESSES = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque"]
 
 def view_avances():
     st.markdown("## 🏭 Panel de Operador - Registro de Avances")
@@ -439,16 +439,16 @@ def view_avances():
             df_piezas['hojas'] = 1
         df_piezas['total_requeridas'] = df_piezas['cantidad'] * df_piezas['hojas']
         
-        # Verificar si la pieza pasa por area_seleccionada y obtener su area anterior
+        # Verificar si la pieza pasa por area_seleccionada y obtener su area anterior (bypasseando Pintura)
         def get_area_anterior(ruta_str, current_area):
-            procesos = str(ruta_str).split(', ')
+            procesos = [p.strip() for p in str(ruta_str).split(',') if p.strip() and p.strip() != 'Pintura']
             if current_area in procesos:
                 idx = procesos.index(current_area)
                 if idx > 0:
                     return procesos[idx - 1]
             return None
             
-        df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area_seleccionada in str(x).split(', '))
+        df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area_seleccionada in [p.strip() for p in str(x).split(',') if p.strip() and p.strip() != 'Pintura'])
         df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
         
         if df_piezas.empty:

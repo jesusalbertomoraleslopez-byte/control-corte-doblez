@@ -63,7 +63,7 @@ def view_consultas():
         else:
             # Agrupar por area
             avances_por_area = df_dia.groupby('Área')['Cantidad'].sum().to_dict()
-            areas_orden = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+            areas_orden = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque"]
             
             process_icons = {
                 "Ingenieria": "💻",
@@ -71,7 +71,6 @@ def view_consultas():
                 "Rebabeo": "⚙️",
                 "Doblez": "📐",
                 "Barrenado": "🔩",
-                "Pintura": "🎨",
                 "Liberado": "✅",
                 "Empaque": "📦"
             }
@@ -167,7 +166,7 @@ def view_consultas():
         with col1:
             search_of = st.text_input("Buscar por OF:", "")
         with col2:
-            search_area = st.selectbox("Filtrar por Área:", ["Todas", "Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"])
+            search_area = st.selectbox("Filtrar por Área:", ["Todas", "Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque"])
         with col3:
             tipo_mov = st.selectbox("Tipo de Movimiento:", ["Ambos", "Avances", "Rechazos"])
 
@@ -236,15 +235,14 @@ def view_consultas():
             
             # 2. Separar por área
             st.markdown("### 🗂️ Scrap Registrado por Área")
-            areas_list = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
-            cols = st.columns(4)
+            areas_list = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque"]
+            cols = st.columns(3)
             
             process_icons = {
                 "Corte": "✂️",
                 "Rebabeo": "⚙️",
                 "Doblez": "📐",
                 "Barrenado": "🔩",
-                "Pintura": "🎨",
                 "Liberado": "✅",
                 "Empaque": "📦"
             }
@@ -254,7 +252,6 @@ def view_consultas():
                 "Rebabeo": "Rebabeo / Lijado",
                 "Doblez": "Doblez",
                 "Barrenado": "Barrenado",
-                "Pintura": "Pintura",
                 "Liberado": "Liberado / Calidad",
                 "Empaque": "Empaque / Embarque"
             }
@@ -268,7 +265,7 @@ def view_consultas():
                 pct = (scrap_val / total_scrap * 100) if total_scrap > 0 else 0
                 label = friendly_names.get(area, area)
                 
-                with cols[idx % 4]:
+                with cols[idx % 3]:
                     st.markdown(
                         f'''
                         <div style="background-color: #f8f9fa; border-top: 5px solid {color}; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative;">
@@ -394,7 +391,7 @@ def view_consultas():
                 df_filt = df_filt[df_filt["Nido"].isin(sel_nidos_mat)]
 
             # Filtro por Proceso (busca en la columna Ruta)
-            all_procesos = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+            all_procesos = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque"]
             with col_f3:
                 sel_proceso_mat = st.selectbox(
                     "⚙️ Filtrar piezas que pasan por:",

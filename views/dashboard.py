@@ -8,16 +8,15 @@ from utils.database import get_active_of, get_dashboard_stats
 # ─────────────────────────────────────────────
 #  CONSTANTS
 # ─────────────────────────────────────────────
-PROCESSES = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
-PROCESS_LABELS = ["Ingeniería", "Corte Láser", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
-PROCESS_WEIGHTS = [0.03, 0.25, 0.10, 0.25, 0.10, 0.15, 0.05, 0.07]
+PROCESSES = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque"]
+PROCESS_LABELS = ["Ingeniería", "Corte Láser", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque"]
+PROCESS_WEIGHTS = [0.03, 0.30, 0.12, 0.30, 0.13, 0.05, 0.07]
 PROCESS_COLORS = [
     "#FFD700",  # Ingeniería – gold
     "#00BFFF",  # Corte Láser – deep sky blue
     "#FF6347",  # Rebabeo – tomato
     "#DC143C",  # Doblez – crimson
     "#FF8C00",  # Barrenado - dark orange
-    "#9370DB",  # Pintura – medium purple
     "#D2B48C",  # Liberado – tan
     "#32CD32",  # Empaque – lime green
 ]

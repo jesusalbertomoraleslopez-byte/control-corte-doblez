@@ -416,7 +416,7 @@ def view_mantenimiento():
         
         # Construir matriz de checkboxes
         matrix_rows = []
-        app_areas = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque", "Ingenieria"]
+        app_areas = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque", "Ingenieria"]
         
         for _, r_pers in df_pers.iterrows():
             nom = r_pers['nombre']

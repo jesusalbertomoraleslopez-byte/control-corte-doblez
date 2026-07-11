@@ -72,7 +72,7 @@ def view_dashboard_global():
         )
     
     # Calcular avances por área para el desglose
-    processes = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+    processes = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque"]
     area_avances = {}
     if not df_avances.empty:
         area_av = df_avances.groupby('area')['cantidad'].sum().to_dict()
