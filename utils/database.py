@@ -1,8 +1,26 @@
 import sqlite3
 import pandas as pd
 import datetime
+import subprocess
+import threading
 
 DB_PATH = "sigrama.db"
+
+def git_sync_db():
+    """Hace commit y push de sigrama.db a GitHub en un hilo separado para no bloquear la UI."""
+    def _sync():
+        try:
+            subprocess.run(["git", "add", "sigrama.db"], capture_output=True, timeout=15)
+            result = subprocess.run(
+                ["git", "commit", "-m", f"Auto-sync DB {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
+                capture_output=True, timeout=15
+            )
+            # Solo hace push si hubo cambios (exit code 0 = nuevo commit creado)
+            if result.returncode == 0:
+                subprocess.run(["git", "push", "origin", "main"], capture_output=True, timeout=30)
+        except Exception:
+            pass  # Silencioso: no romper la app si git falla
+    threading.Thread(target=_sync, daemon=True).start()
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
@@ -287,6 +305,7 @@ def save_production_plan(of_number, proyecto, programador, fecha, df_nidos, df_p
             
     conn.commit()
     conn.close()
+    git_sync_db()
 
 def get_nidos(of_number):
     conn = get_connection()
@@ -338,6 +357,7 @@ def update_ruta_piezas(of_number, actualizaciones):
                   [{'of_number': of_number, **d} for d in actualizaciones])
     conn.commit()
     conn.close()
+    git_sync_db()
 
 def get_avances_nido(of_number, nido):
     """Devuelve las áreas en las que este nido ya está terminado."""
@@ -402,6 +422,7 @@ def save_avances_mixto(of_number, nido, area, is_corte, df_terminadas, df_rechaz
                 
     conn.commit()
     conn.close()
+    git_sync_db()
 
 def get_total_rechazos(of_number=None):
     conn = get_connection()
