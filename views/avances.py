@@ -412,22 +412,44 @@ def view_avances():
                 height=200
             )
             
-            if st.button(f"✅ Registrar Hoja {hoja_actual} Terminada", type="primary"):
-                if not operador.strip():
-                    st.error("⚠️ Por favor selecciona un Operador válido.")
-                    st.stop()
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                if st.button(f"✅ Registrar Hoja {hoja_actual} Terminada", type="primary", use_container_width=True):
+                    if not operador.strip():
+                        st.error("⚠️ Por favor selecciona un Operador válido.")
+                        st.stop()
+                        
+                    df_terminadas = edited_df.copy()
+                    df_terminadas["Terminadas"] = df_terminadas["cantidad"] # Avanza exactamente lo de 1 hoja
+                    df_terminadas["of_number"] = actual_of
                     
-                df_terminadas = edited_df.copy()
-                df_terminadas["Terminadas"] = df_terminadas["cantidad"] # Avanza exactamente lo de 1 hoja
-                df_terminadas["of_number"] = actual_of
-                
-                df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
-                if not df_rechazos.empty:
-                    df_rechazos["of_number"] = actual_of
-                    
-                save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, hoja_actual)
-                st.success(f"🎉 ¡Hoja {hoja_actual} registrada en Corte!")
-                st.rerun()
+                    df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
+                    if not df_rechazos.empty:
+                        df_rechazos["of_number"] = actual_of
+                        
+                    save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, hoja_actual)
+                    st.success(f"🎉 ¡Hoja {hoja_actual} registrada en Corte!")
+                    st.rerun()
+            
+            with col_b2:
+                if st.button(f"⏩ Registrar TODAS las Hojas ({hoja_actual} a {total_hojas})", type="secondary", use_container_width=True):
+                    if not operador.strip():
+                        st.error("⚠️ Por favor selecciona un Operador válido.")
+                        st.stop()
+                        
+                    with st.spinner("Registrando todas las hojas..."):
+                        for h in range(hoja_actual, total_hojas + 1):
+                            df_terminadas = edited_df.copy()
+                            df_terminadas["Terminadas"] = df_terminadas["cantidad"]
+                            df_terminadas["of_number"] = actual_of
+                            
+                            df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
+                            if not df_rechazos.empty:
+                                df_rechazos["of_number"] = actual_of
+                                
+                            save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, h)
+                    st.success(f"🎉 ¡Hojas {hoja_actual} a {total_hojas} registradas exitosamente en Corte!")
+                    st.rerun()
 
     elif is_post_corte:
         st.markdown(f"### 📋 Números de Parte de la OF: **{of_number}**")
