@@ -43,22 +43,37 @@ def calculate_global_wip(of_number):
         if area == "Corte":
             conn = get_connection()
             c = conn.cursor()
-            if of_number == "Todas" or of_number is None:
-                c.execute("SELECT DISTINCT of_number, nido FROM avances WHERE area = 'Corte'")
-                terminados_tuples = set((row[0], row[1]) for row in c.fetchall())
-                # Filtramos usando un MultiIndex para mayor precisión
-                # Conservamos las filas donde (of_number, nido) NO está en terminados_tuples
-                if not df_todas.empty:
-                    df_corte_pend = df_todas[~df_todas.apply(lambda row: (row['of_number'], row['nido']) in terminados_tuples, axis=1)]
-                else:
-                    df_corte_pend = df_todas
-            else:
-                c.execute("SELECT DISTINCT nido FROM avances WHERE of_number = ? AND area = 'Corte'", (of_number,))
-                terminados = [row[0] for row in c.fetchall()]
-                df_corte_pend = df_todas[~df_todas['nido'].isin(terminados)]
+            # Buscar nidos terminados (donde hojas cortadas >= hojas requeridas)
+            c.execute("""
+                SELECT n.of_number, n.nido 
+                FROM nidos n 
+                LEFT JOIN avances a ON n.of_number = a.of_number AND n.nido = a.nido AND a.area = 'Corte'
+                GROUP BY n.of_number, n.nido, n.hojas
+                HAVING COUNT(DISTINCT a.hoja) >= n.hojas
+            """)
+            terminados_tuples = set((row[0], row[1]) for row in c.fetchall())
             conn.close()
             
-            wip_por_area[area] = int(df_corte_pend['total_requeridas'].sum()) if not df_corte_pend.empty else 0
+            if of_number == "Todas" or of_number is None:
+                df_corte_pend = df_todas[~df_todas.apply(lambda row: (row['of_number'], row['nido']) in terminados_tuples, axis=1)]
+            else:
+                df_corte_pend = df_todas[
+                    (df_todas['of_number'] == of_number) & 
+                    (~df_todas.apply(lambda row: (row['of_number'], row['nido']) in terminados_tuples, axis=1))
+                ]
+            
+            total_wip_corte = 0
+            if not df_corte_pend.empty:
+                conn = get_connection()
+                c_av = conn.cursor()
+                for (of_n, nido_n), grp in df_corte_pend.groupby(['of_number', 'nido']):
+                    c_av.execute("SELECT SUM(cantidad) FROM avances WHERE of_number=? AND nido=? AND area='Corte'", (of_n, nido_n))
+                    avanzado_nido = c_av.fetchone()[0] or 0
+                    total_req_nido = grp['total_requeridas'].sum()
+                    total_wip_corte += max(0, total_req_nido - avanzado_nido)
+                conn.close()
+            
+            wip_por_area[area] = int(total_wip_corte)
             continue
             
         # Post corte
@@ -146,16 +161,42 @@ def get_wip_pieces_detail(of_list, area):
         if area == "Corte":
             conn = get_connection()
             c = conn.cursor()
-            c.execute("SELECT DISTINCT nido FROM avances WHERE of_number = ? AND area = 'Corte'", (of_num,))
+            c.execute("""
+                SELECT n.nido 
+                FROM nidos n 
+                LEFT JOIN avances a ON n.of_number = a.of_number AND n.nido = a.nido AND a.area = 'Corte'
+                WHERE n.of_number = ?
+                GROUP BY n.nido, n.hojas
+                HAVING COUNT(DISTINCT a.hoja) >= n.hojas
+            """, (of_num,))
             terminados = [row[0] for row in c.fetchall()]
             conn.close()
             
             df_corte_pend = df_todas[~df_todas['nido'].isin(terminados)]
             if not df_corte_pend.empty:
-                df_g = df_corte_pend.groupby(['no_pieza', 'nombre_pieza'])['total_requeridas'].sum().reset_index()
-                df_g['of_number'] = of_num
-                df_g.rename(columns={'total_requeridas': 'cantidad_wip'}, inplace=True)
-                details.append(df_g)
+                conn = get_connection()
+                c_av = conn.cursor()
+                df_g_list = []
+                for (no_p, nom_p), grp in df_corte_pend.groupby(['no_pieza', 'nombre_pieza']):
+                    c_av.execute(
+                        "SELECT SUM(cantidad) FROM avances "
+                        "WHERE of_number=? AND no_pieza=? AND area='Corte'",
+                        (of_num, no_p)
+                    )
+                    avanzado_p = c_av.fetchone()[0] or 0
+                    total_req_p = grp['total_requeridas'].sum()
+                    faltante_p = max(0, total_req_p - avanzado_p)
+                    if faltante_p > 0:
+                        df_g_list.append({
+                            'no_pieza': no_p,
+                            'nombre_pieza': nom_p,
+                            'cantidad_wip': int(faltante_p),
+                            'of_number': of_num
+                        })
+                conn.close()
+                if df_g_list:
+                    df_g = pd.DataFrame(df_g_list)
+                    details.append(df_g)
         else:
             df_piezas = df_todas.copy()
             df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in [p.strip() for p in str(x).split(',') if p.strip() and p.strip() != 'Pintura'])
