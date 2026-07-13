@@ -248,6 +248,26 @@ def view_planeacion():
 
             if not errores:
                 st.success("✅ **¡Todo correcto!** Los datos cuadran perfectamente.")
+                
+                # --- PREVISUALIZACIÓN DE PRE-CARGA ---
+                with st.expander("🔍 Previsualizar Registros a Cargar (Nidos y Piezas)", expanded=True):
+                    st.info("Los siguientes datos se guardarán en la base de datos para la nueva OF:")
+                    
+                    t1, t2, t3 = st.tabs(["🗂️ Nidos (Pre-Carga)", "🔩 Piezas (Pre-Carga)", "📊 Totales Calculados"])
+                    with t1:
+                        st.dataframe(df_n, use_container_width=True, height=250)
+                    with t2:
+                        st.dataframe(df_p, use_container_width=True, height=250)
+                    with t3:
+                        if not df_totales.empty:
+                            st.caption("Fórmula: Cantidad × Hojas (repeticiones) = Total real a fabricar")
+                            st.dataframe(df_totales, use_container_width=True, height=250)
+                            try:
+                                total_precarga = int(pd.to_numeric(df_totales['CANTIDAD * REPETICION'], errors='coerce').sum())
+                                st.markdown(f"🔢 Total de piezas estimadas a cargar: **`{total_precarga}`**")
+                            except Exception:
+                                pass
+                
                 if st.button("🚀 Confirmar y Cargar a Base de Datos", type="primary", use_container_width=True):
                     # Guardar en SQLite
                     save_production_plan(
