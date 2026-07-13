@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+import subprocess
 from utils.database import get_connection, clear_avances_rechazos, clear_plans_keep_catalog, clear_db, get_personal_prenomina
 from views.correcciones import view_correcciones
 
@@ -763,8 +764,6 @@ def view_mantenimiento_admin():
     with col_git_btn2:
         if st.button("🔄 Actualizar Historial", key="refresh_git_commits", use_container_width=True):
             st.rerun()
-            
-    import subprocess
     try:
         # Ejecutar comando git log para obtener los últimos 8 commits
         result = subprocess.run(
