@@ -206,6 +206,35 @@ def view_mantenimiento_admin():
                 finally:
                     conn.close()
                     
+        # --- RESETEAR AVANCES DE OF ESPECIFICA ---
+        st.markdown("---")
+        st.header("🔄 Resetear Avances y Rechazos de una OF")
+        st.markdown("Si necesitas reiniciar los contadores de producción de una OF, puedes borrar todos sus avances y rechazos aquí. **Esto conservará el plan de producción (nidos y piezas)**.")
+        
+        col_res_of, col_res_btn = st.columns([2, 1])
+        with col_res_of:
+            of_to_reset = st.selectbox("Selecciona la OF a resetear:", df_ofs_del["of_number"].tolist(), key="selectbox_reset_of")
+            confirm_res_of = st.checkbox(f"Confirmar que deseo resetear avances/rechazos de la **{of_to_reset}**", key="confirm_reset_of_chk")
+            
+        with col_res_btn:
+            st.write("")
+            st.write("")
+            if st.button("🔄 Resetear Avances de la OF", type="primary", disabled=not confirm_res_of, use_container_width=True):
+                conn = get_connection()
+                c = conn.cursor()
+                try:
+                    c.execute("DELETE FROM avances WHERE of_number = ?", (of_to_reset,))
+                    c.execute("DELETE FROM rechazos WHERE of_number = ?", (of_to_reset,))
+                    conn.commit()
+                    from utils.database import git_sync_db
+                    git_sync_db()
+                    st.success(f"✅ ¡Se han borrado los avances y rechazos de la orden {of_to_reset} con éxito! El plan de producción se conservó.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al resetear avances de la orden: {e}")
+                finally:
+                    conn.close()
+
     st.markdown("---")
     st.header("📅 Redistribuir Fechas de Avances (Simulación Histórica)")
     st.markdown(

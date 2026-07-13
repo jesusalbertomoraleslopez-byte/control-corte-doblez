@@ -179,7 +179,13 @@ def get_active_of():
             cols_to_select.append(ec)
             
     cols_str = ", ".join(cols_to_select)
-    c.execute(f"SELECT {cols_str} FROM ordenes ORDER BY fecha_carga DESC LIMIT 1")
+    
+    import streamlit as st
+    session_of = st.session_state.get("of_number")
+    if session_of:
+        c.execute(f"SELECT {cols_str} FROM ordenes WHERE of_number = ?", (session_of,))
+    else:
+        c.execute(f"SELECT {cols_str} FROM ordenes ORDER BY fecha_carga DESC LIMIT 1")
     row = c.fetchone()
     conn.close()
     
