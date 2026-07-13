@@ -10,41 +10,124 @@ TEMP_DB_PATH = "sigrama_temp.db"
 
 _last_excel_mtime = 0
 
+def sync_and_push_db():
+    """Sincroniza la base de datos local con GitHub resolviendo conflictos a nivel de datos en Python."""
+    import streamlit as st
+    try:
+        # Configurar URL con token si existe
+        token = st.secrets.get("GITHUB_TOKEN")
+        if token:
+            url = f"https://{token}@github.com/jesusalbertomoraleslopez-byte/control-corte-doblez.git"
+            subprocess.run(["git", "remote", "set-url", "origin", url], capture_output=True)
+    except Exception:
+        pass
+
+    # Fetch remoto
+    subprocess.run(["git", "fetch", "origin", "main"], capture_output=True)
+
+    # Intentar obtener el Excel de la rama remota
+    remote_excel = "sigrama_database_remote.xlsx"
+    has_remote = False
+    res_show = subprocess.run(["git", "show", "origin/main:sigrama_database.xlsx"], capture_output=True)
+    if res_show.returncode == 0:
+        try:
+            with open(remote_excel, "wb") as f:
+                f.write(res_show.stdout)
+            has_remote = True
+        except Exception:
+            pass
+
+    # Fusionar datos en SQLite
+    conn = sqlite3.connect(TEMP_DB_PATH)
+    tables = {
+        "ordenes": ["of_number"],
+        "nidos": ["of_number", "nido"],
+        "piezas": ["of_number", "nido", "no_pieza"],
+        "avances": ["of_number", "nido", "no_pieza", "area", "operador", "maquina", "hoja", "timestamp"],
+        "rechazos": ["of_number", "nido", "no_pieza", "area", "operador", "maquina", "hoja", "timestamp", "motivo"],
+        "personal_areas": ["operador_nombre", "area"]
+    }
+
+    if has_remote:
+        try:
+            xls_remote = pd.ExcelFile(remote_excel)
+            for t, keys in tables.items():
+                try:
+                    df_local = pd.read_sql_query(f"SELECT * FROM {t}", conn)
+                except Exception:
+                    df_local = pd.DataFrame()
+
+                df_remote = pd.DataFrame()
+                if t in xls_remote.sheet_names:
+                    try:
+                        df_remote = pd.read_excel(xls_remote, sheet_name=t)
+                    except Exception:
+                        pass
+
+                if not df_remote.empty:
+                    c_info = conn.cursor()
+                    c_info.execute(f"PRAGMA table_info({t})")
+                    cols = [col[1] for col in c_info.fetchall()]
+                    
+                    remote_cols = [c for c in cols if c in df_remote.columns]
+                    df_remote = df_remote[remote_cols]
+
+                    if df_local.empty:
+                        df_merged = df_remote
+                    else:
+                        df_merged = pd.concat([df_local, df_remote], ignore_index=True)
+
+                    df_merged = df_merged.astype(object).where(pd.notnull(df_merged), None)
+                    df_merged = df_merged.drop_duplicates(subset=keys)
+
+                    c = conn.cursor()
+                    c.execute(f"DELETE FROM {t}")
+                    df_merged.to_sql(t, conn, if_exists='append', index=False)
+            conn.commit()
+        except Exception as e:
+            print(f"Error al fusionar base de datos: {e}")
+        finally:
+            if os.path.exists(remote_excel):
+                try:
+                    os.remove(remote_excel)
+                except:
+                    pass
+    conn.close()
+
+    # Guardar estado SQLite a Excel local
+    save_db_to_excel()
+
+    # Configurar identidad de git
+    subprocess.run(["git", "config", "user.email", "bot@sigrama.com"], capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Sigrama Bot"], capture_output=True)
+
+    # Mover el puntero local sobre el remoto
+    subprocess.run(["git", "reset", "--mixed", "origin/main"], capture_output=True)
+
+    # Agregar Excel fusionado
+    subprocess.run(["git", "add", EXCEL_DB_PATH], capture_output=True)
+
+    # Crear commit
+    res_commit = subprocess.run(
+        ["git", "commit", "-m", f"Sync DB Excel {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
+        capture_output=True, timeout=15
+    )
+
+    # Push
+    res_push = subprocess.run(
+        ["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "push", "origin", "main"],
+        capture_output=True, timeout=30
+    )
+    return res_commit, res_push
+
 def git_sync_db():
     """Hace commit y push de sigrama_database.xlsx a GitHub en un hilo separado para no bloquear la UI."""
     def _sync():
         try:
             if os.path.exists(EXCEL_DB_PATH):
-                import streamlit as st
-                try:
-                    token = st.secrets.get("GITHUB_TOKEN")
-                    if token:
-                        url = f"https://{token}@github.com/jesusalbertomoraleslopez-byte/control-corte-doblez.git"
-                        subprocess.run(["git", "remote", "set-url", "origin", url], capture_output=True)
-                except Exception:
-                    pass
-                
-                # Configurar identidad de git (requerido en contenedores sin config global)
-                subprocess.run(["git", "config", "user.email", "bot@sigrama.com"], capture_output=True)
-                subprocess.run(["git", "config", "user.name", "Sigrama Bot"], capture_output=True)
-                
-                subprocess.run(["git", "add", EXCEL_DB_PATH], capture_output=True, timeout=15)
-                result = subprocess.run(
-                    ["git", "commit", "-m", f"Auto-sync DB Excel {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
-                    capture_output=True, timeout=15
-                )
-                if result.returncode == 0:
-                    # Pull con rebase primero para evitar rechazos cuando hay commits más nuevos en remoto
-                    subprocess.run(
-                        ["git", "pull", "--rebase", "origin", "main"],
-                        capture_output=True, timeout=30
-                    )
-                    subprocess.run(
-                        ["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "push", "origin", "main"],
-                        capture_output=True, timeout=30
-                    )
+                sync_and_push_db()
         except Exception:
-            pass  # Silencioso: no romper la app si git falla
+            pass
     threading.Thread(target=_sync, daemon=True).start()
 
 def save_db_to_excel(conn=None):

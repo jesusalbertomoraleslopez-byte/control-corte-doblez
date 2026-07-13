@@ -735,38 +735,9 @@ def view_mantenimiento_admin():
     col_git_title, col_git_btn1, col_git_btn2 = st.columns([2, 1, 1])
     with col_git_btn1:
         if st.button("🔄 Sincronizar con GitHub", key="sync_git_manually", use_container_width=True, type="primary"):
-            import datetime
             try:
-                from utils.database import EXCEL_DB_PATH, save_db_to_excel
-                save_db_to_excel()
-                # Configurar identidad de git (requerido en contenedores sin config global)
-                subprocess.run(["git", "config", "user.email", "bot@sigrama.com"], capture_output=True)
-                subprocess.run(["git", "config", "user.name", "Sigrama Bot"], capture_output=True)
-                
-                subprocess.run(["git", "add", EXCEL_DB_PATH], capture_output=True, timeout=15)
-                res_commit = subprocess.run(
-                    ["git", "commit", "-m", f"Manual-sync DB Excel {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
-                    capture_output=True, timeout=15
-                )
-                # Intentar usar token de secrets para cambiar a HTTPS si está configurado
-                try:
-                    token = st.secrets.get("GITHUB_TOKEN")
-                    if token:
-                        url = f"https://{token}@github.com/jesusalbertomoraleslopez-byte/control-corte-doblez.git"
-                        subprocess.run(["git", "remote", "set-url", "origin", url], capture_output=True)
-                except Exception:
-                    pass
-
-                # Intentar pull con rebase para evitar errores de sincronización por commits remotos más nuevos
-                subprocess.run(
-                    ["git", "pull", "--rebase", "origin", "main"],
-                    capture_output=True, timeout=30
-                )
-
-                res_push = subprocess.run(
-                    ["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "push", "origin", "main"],
-                    capture_output=True, timeout=30
-                )
+                from utils.database import sync_and_push_db
+                res_commit, res_push = sync_and_push_db()
                 if res_push.returncode == 0:
                     st.success("✅ ¡Sincronizado con éxito en GitHub!")
                     st.balloons()
