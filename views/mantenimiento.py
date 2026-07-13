@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from utils.database import get_connection, clear_avances_rechazos, clear_plans_keep_catalog, clear_db, get_personal_prenomina
+from views.correcciones import view_correcciones
 
 def get_stats():
     conn = get_connection()
@@ -43,8 +44,7 @@ def get_catalog():
 def convert_df(df):
     return df.to_csv(index=False).encode('utf-8')
 
-def view_mantenimiento():
-    st.title("🛠️ 6. MANTENIMIENTO DEL SISTEMA")
+def view_mantenimiento_admin():
     st.markdown("### Panel de Control Administrativo y Limpieza de Datos")
     st.markdown(
         """
@@ -718,3 +718,17 @@ def view_mantenimiento():
             st.info("No se encontró historial de cambios de Git.")
     except Exception as err:
         st.warning(f"No se pudo consultar el historial de GitHub: {err}")
+
+def view_mantenimiento():
+    st.title("🛠️ 6. MANTENIMIENTO DEL SISTEMA")
+    
+    tab_admin, tab_correc = st.tabs([
+        "🛠️ MANTENIMIENTO Y RESPALDOS",
+        "✏️ CORRECCIÓN DE AVANCES/RECHAZOS"
+    ])
+    
+    with tab_admin:
+        view_mantenimiento_admin()
+        
+    with tab_correc:
+        view_correcciones()

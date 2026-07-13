@@ -451,53 +451,7 @@ def view_produccion():
 
     active_of = get_active_of()
 
-    # ══════════════════════════════════════════════════════════
-    # ZONA DE LIMPIEZA — SIEMPRE VISIBLE
-    # ══════════════════════════════════════════════════════════
-    st.markdown("""
-    <div style="background:#FFF3CD; border:2px solid #EC2024; border-radius:8px;
-                padding:12px 18px; margin-bottom:12px;">
-      <b style="color:#111111; font-size:16px;">🗑️ Limpieza de Registros / Nueva Orden de Fabricación</b>
-    </div>
-    """, unsafe_allow_html=True)
-
-    col_estado, col_btn = st.columns([3, 1])
-    with col_estado:
-        if active_of:
-            proj_client_info = f" | Cliente: {active_of.get('proyecto_cliente')}" if active_of.get('proyecto_cliente') else ""
-            st.warning(
-                f"⚠️ OF Activa: **{active_of['of_number']}** — "
-                f"Proyecto: **{active_of['proyecto']}**{proj_client_info}"
-            )
-        else:
-            st.info("ℹ️ No hay registros activos.")
-    with col_btn:
-        if st.button("🗑️ Limpiar todos los registros", type="primary", use_container_width=True):
-            if 'temp_production_data' in st.session_state: del st.session_state['temp_production_data']
-            reset_of()
-
-    st.markdown("---")
-
-    tab_avances, tab_correccion, tab_reportes = st.tabs([
-        "📝 4.1 AVANCES POR ÁREA", 
-        "✏️ 4.2 CORRECCIONES", 
-        "📊 4.3 REPORTES"
-    ])
-
-    with tab_avances:
-        if active_of is not None:
-            view_avances()
-        else:
-            st.info("⚠️ Primero debes Cargar y Confirmar un Plan de Producción en el menú de 'Planeación'.")
-            
-    with tab_correccion:
-        if active_of is not None:
-            view_correcciones()
-        else:
-            st.info("⚠️ Primero debes Cargar y Confirmar un Plan de Producción en el menú de 'Planeación'.")
-            
-    with tab_reportes:
-        if active_of is not None:
-            view_reportes()
-        else:
-            st.info("⚠️ Primero debes Cargar y Confirmar un Plan de Producción en el menú de 'Planeación'.")
+    if active_of is not None:
+        view_avances()
+    else:
+        st.info("⚠️ Primero debes Cargar y Confirmar un Plan de Producción en el menú de 'Planeación'.")

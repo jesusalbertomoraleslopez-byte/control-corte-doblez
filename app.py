@@ -56,6 +56,19 @@ def logout():
     st.session_state.role = None
     st.rerun()
 
+def get_sidebar_stats():
+    try:
+        from utils.database import get_connection
+        from views.reportes import calculate_global_wip
+        conn = get_connection()
+        df_avances = pd.read_sql_query("SELECT area, SUM(cantidad) as cantidad FROM avances GROUP BY area", conn)
+        wip_data = calculate_global_wip("Todas")
+        conn.close()
+        av_dict = df_avances.set_index('area')['cantidad'].to_dict() if not df_avances.empty else {}
+        return av_dict, wip_data
+    except Exception:
+        return {}, {}
+
 # --- Menú Lateral ---
 def render_sidebar():
     logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
@@ -100,6 +113,53 @@ def render_sidebar():
         ])
         
     choice = st.sidebar.radio("Navegación", menu)
+    
+    st.sidebar.markdown("---")
+
+    av_dict, wip_data = get_sidebar_stats()
+    
+    av_ingenieria = av_dict.get("Ingenieria", 0)
+    av_corte = av_dict.get("Corte", 0)
+    av_rebabeo = av_dict.get("Rebabeo", 0)
+    av_doblez = av_dict.get("Doblez", 0)
+    av_barrenado = av_dict.get("Barrenado", 0)
+    av_liberado = av_dict.get("Liberado", 0)
+    av_empaque = av_dict.get("Empaque", 0)
+    
+    wip_corte = wip_data.get("Corte", 0)
+    wip_rebabeo = wip_data.get("Rebabeo", 0)
+    wip_doblez = wip_data.get("Doblez", 0)
+    wip_barrenado = wip_data.get("Barrenado", 0)
+    wip_liberado = wip_data.get("Liberado", 0)
+    wip_empaque = wip_data.get("Empaque", 0)
+    
+    stats_html = f"""
+    <div style="background-color: #1a1a1a; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #32CD32; font-family: 'Questrial', sans-serif;">
+        <p style="margin: 0; font-size: 0.85rem; color: #aaa; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">📈 AVANCES REGISTRADOS</p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.75rem; color: #fff; margin-top: 8px;">
+            <div><b>Ingeniería:</b> {av_ingenieria:,}</div>
+            <div><b>Corte:</b> {av_corte:,}</div>
+            <div><b>Rebabeo:</b> {av_rebabeo:,}</div>
+            <div><b>Doblez:</b> {av_doblez:,}</div>
+            <div><b>Barrenado:</b> {av_barrenado:,}</div>
+            <div><b>Liberado:</b> {av_liberado:,}</div>
+            <div style="grid-column: span 2;"><b>Empaque:</b> {av_empaque:,}</div>
+        </div>
+    </div>
+
+    <div style="background-color: #1a1a1a; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #EC2024; font-family: 'Questrial', sans-serif;">
+        <p style="margin: 0; font-size: 0.85rem; color: #aaa; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">🏭 WIP REGISTRADO (EN PISO)</p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.75rem; color: #fff; margin-top: 8px;">
+            <div><b>Corte:</b> {wip_corte:,}</div>
+            <div><b>Rebabeo:</b> {wip_rebabeo:,}</div>
+            <div><b>Doblez:</b> {wip_doblez:,}</div>
+            <div><b>Barrenado:</b> {wip_barrenado:,}</div>
+            <div><b>Liberado:</b> {wip_liberado:,}</div>
+            <div style="grid-column: span 2;"><b>Empaque:</b> {wip_empaque:,}</div>
+        </div>
+    </div>
+    """
+    st.sidebar.markdown(stats_html, unsafe_allow_html=True)
     
     st.sidebar.markdown("---")
 

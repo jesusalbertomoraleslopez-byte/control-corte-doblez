@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
 import io
+from views.reportes import view_reportes
 
 def get_connection():
     return sqlite3.connect("sigrama.db")
@@ -22,12 +23,13 @@ def convert_df(df):
 def view_consultas():
     st.title("2. CONSULTAS Y REPORTES")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📅 Avance del Día", 
         "📊 Avance Semanal", 
         "🔍 Trazabilidad", 
         "📉 Calidad (Rechazos)",
-        "📦 Material Programado"
+        "📦 Material Programado",
+        "🏭 WIP en Piso (Reportes)"
     ])
 
     # --- PESTAÑA 1: Avance del Día ---
@@ -646,3 +648,7 @@ def view_consultas():
                     showlegend=False
                 )
                 st.plotly_chart(fig_top, use_container_width=True)
+
+    # --- PESTAÑA 6: WIP en Piso (Reportes) ---
+    with tab6:
+        view_reportes()
