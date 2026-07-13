@@ -346,18 +346,24 @@ def view_avances():
         )
         
         if st.button("✅ Guardar Avances de Ingeniería", type="primary"):
-            # Encontrar las que se acaban de marcar y no estaban antes
-            nuevas_terminadas = edited_df[edited_df["Diseñada"] & (~edited_df["no_pieza"].isin(terminadas))].copy()
-            
-            if nuevas_terminadas.empty:
-                st.info("No hay partes nuevas por registrar.")
-            else:
-                # Guardamos cada parte con nido='N/A' y cantidad=1
-                nuevas_terminadas["cantidad"] = 1
-                nuevas_terminadas["Terminadas"] = 1
-                save_avances_mixto(of_number, "N/A", area_seleccionada, False, nuevas_terminadas, None, operador, maquina, None)
-                st.success(f"🎉 ¡{len(nuevas_terminadas)} partes marcadas como terminadas en Ingeniería!")
-                st.rerun()
+            try:
+                # Construir clave compuesta OF-no_pieza para comparar correctamente
+                edited_df["_key"] = edited_df["of_number"].astype(str) + "-" + edited_df["no_pieza"].astype(str)
+                nuevas_terminadas = edited_df[
+                    edited_df["Diseñada"] & (~edited_df["_key"].isin(terminadas))
+                ].copy()
+                
+                if nuevas_terminadas.empty:
+                    st.info("No hay partes nuevas por registrar. Todas las partes marcadas ya estaban guardadas.")
+                else:
+                    nuevas_terminadas["cantidad"] = 1
+                    nuevas_terminadas["Terminadas"] = 1
+                    save_avances_mixto(of_number, "N/A", area_seleccionada, False, nuevas_terminadas, None, operador, maquina, None)
+                    st.success(f"🎉 ¡{len(nuevas_terminadas)} partes marcadas como terminadas en Ingeniería!")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error al guardar avances de Ingeniería: {e}")
+
                 
     elif is_corte and nido_seleccionado != "Seleccionar...":
         st.markdown(f"### 📋 Detalles del Nido: **{nido_seleccionado}**")
