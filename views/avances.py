@@ -174,8 +174,9 @@ def view_avances():
             # Consultar scrap total (todas las áreas) y reposiciones ya hechas
             conn = get_connection()
             if of_number == "Todas":
-                df_re_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as rechazadas FROM rechazos GROUP BY no_pieza", conn)
-                df_rep_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as repuestas FROM avances WHERE area='Corte' AND nido='REPOSICION' GROUP BY no_pieza", conn)
+                # IMPORTANTE: incluir of_number en GROUP BY para no mezclar OFs con mismo no_pieza
+                df_re_c = pd.read_sql_query("SELECT of_number, no_pieza, SUM(cantidad) as rechazadas FROM rechazos GROUP BY of_number, no_pieza", conn)
+                df_rep_c = pd.read_sql_query("SELECT of_number, no_pieza, SUM(cantidad) as repuestas FROM avances WHERE area='Corte' AND nido='REPOSICION' GROUP BY of_number, no_pieza", conn)
             else:
                 df_re_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as rechazadas FROM rechazos WHERE of_number=? GROUP BY no_pieza", conn, params=(of_number,))
                 df_rep_c = pd.read_sql_query("SELECT no_pieza, SUM(cantidad) as repuestas FROM avances WHERE of_number=? AND area='Corte' AND nido='REPOSICION' GROUP BY no_pieza", conn, params=(of_number,))

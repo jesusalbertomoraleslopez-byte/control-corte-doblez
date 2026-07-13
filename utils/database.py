@@ -387,9 +387,12 @@ def save_production_plan(of_number, proyecto, programador, fecha, df_nidos, df_p
                     ruta_val = ruta_excel
             
             if not ruta_val:
-                # Intentar buscar la ruta previamente guardada para esta pieza en la BD
+                # Buscar ruta previa SOLO dentro de la misma OF para evitar contaminar con rutas de otras OFs
                 c_prev = conn.cursor()
-                c_prev.execute("SELECT ruta FROM piezas WHERE no_pieza = ? AND ruta IS NOT NULL AND ruta != '' ORDER BY id DESC LIMIT 1", (pieza_val,))
+                c_prev.execute(
+                    "SELECT ruta FROM piezas WHERE of_number = ? AND no_pieza = ? AND ruta IS NOT NULL AND ruta != '' ORDER BY id DESC LIMIT 1",
+                    (of_number, pieza_val)
+                )
                 row_prev = c_prev.fetchone()
                 if row_prev:
                     ruta_val = row_prev[0]
@@ -596,7 +599,7 @@ def get_dashboard_stats(of_list=None):
     total_piezas = piezas_row[0] or 0
     
     c.execute(f"""
-        SELECT COUNT(DISTINCT p.no_pieza)
+        SELECT COUNT(DISTINCT p.of_number || '||' || p.no_pieza)
         FROM piezas p
         {where_p}
     """, params)
@@ -616,12 +619,13 @@ def get_dashboard_stats(of_list=None):
     areas = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Liberado", "Empaque"]
     for area in areas:
         if area == "Ingenieria":
-            # Para Ingeniería medimos Partes (no_pieza únicos) que pasen por Ing
-            q_partes = f"SELECT COUNT(DISTINCT no_pieza) FROM piezas {where_clause} {'AND' if where_clause else 'WHERE'} ruta LIKE ?"
+            # Para Ingeniería medimos Partes (of_number+no_pieza únicos) que pasen por Ing
+            q_partes = f"SELECT COUNT(DISTINCT of_number || '||' || no_pieza) FROM piezas {where_clause} {'AND' if where_clause else 'WHERE'} ruta LIKE ?"
             c.execute(q_partes, (*params, f"%{area}%"))
             total_partes_area = c.fetchone()[0] or 0
             
-            q_av = f"SELECT COUNT(DISTINCT no_pieza) FROM avances {where_clause} {'AND' if where_clause else 'WHERE'} area = ?"
+            # Contar pares (of_number, no_pieza) únicos con avance — evita mezcla entre OFs
+            q_av = f"SELECT COUNT(DISTINCT of_number || '||' || no_pieza) FROM avances {where_clause} {'AND' if where_clause else 'WHERE'} area = ?"
             c.execute(q_av, (*params, area))
             row_ing = c.fetchone()
             partes_avanzadas = row_ing[0] or 0

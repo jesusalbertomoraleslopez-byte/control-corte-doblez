@@ -21,11 +21,12 @@ def calculate_global_wip(of_number):
 
     conn = get_connection()
     if of_number == "Todas" or of_number is None:
-        df_avances_all = pd.read_sql_query("SELECT no_pieza, area, SUM(cantidad) as cantidad FROM avances GROUP BY no_pieza, area", conn)
-        df_rechazos_all = pd.read_sql_query("SELECT no_pieza, area, SUM(cantidad) as cantidad FROM rechazos GROUP BY no_pieza, area", conn)
+        # IMPORTANTE: incluir of_number en GROUP BY para evitar mezcla entre OFs con mismo no_pieza
+        df_avances_all = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances GROUP BY of_number, no_pieza, area", conn)
+        df_rechazos_all = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos GROUP BY of_number, no_pieza, area", conn)
     else:
-        df_avances_all = pd.read_sql_query("SELECT no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number=? GROUP BY no_pieza, area", conn, params=(of_number,))
-        df_rechazos_all = pd.read_sql_query("SELECT no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number=? GROUP BY no_pieza, area", conn, params=(of_number,))
+        df_avances_all = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number=? GROUP BY of_number, no_pieza, area", conn, params=(of_number,))
+        df_rechazos_all = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number=? GROUP BY of_number, no_pieza, area", conn, params=(of_number,))
     conn.close()
     
     if 'hojas' not in df_todas.columns:
@@ -86,7 +87,7 @@ def calculate_global_wip(of_number):
             continue
             
         df_piezas['area_anterior'] = df_piezas['ruta'].apply(lambda x: get_area_anterior(x, area))
-        df_agrupado = df_piezas.groupby('no_pieza').agg({
+        df_agrupado = df_piezas.groupby(['of_number', 'no_pieza']).agg({
             'total_requeridas': 'sum',
             'area_anterior': 'first'
         }).reset_index()
@@ -94,16 +95,28 @@ def calculate_global_wip(of_number):
         def get_wip(row):
             area_ant = row['area_anterior']
             if pd.isna(area_ant) or not area_ant: return 0
-            wip = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['area'] == area_ant)]['cantidad'].sum()
-            return int(wip)
+            mask = (
+                (df_avances_all['of_number'] == row['of_number']) &
+                (df_avances_all['no_pieza'] == row['no_pieza']) &
+                (df_avances_all['area'] == area_ant)
+            )
+            return int(df_avances_all[mask]['cantidad'].sum())
             
         def get_terminadas_ant(row):
-            term = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['area'] == area)]['cantidad'].sum()
-            return int(term)
+            mask = (
+                (df_avances_all['of_number'] == row['of_number']) &
+                (df_avances_all['no_pieza'] == row['no_pieza']) &
+                (df_avances_all['area'] == area)
+            )
+            return int(df_avances_all[mask]['cantidad'].sum())
             
         def get_rechazadas_ant(row):
-            rech = df_rechazos_all[(df_rechazos_all['no_pieza'] == row['no_pieza']) & (df_rechazos_all['area'] == area)]['cantidad'].sum()
-            return int(rech)
+            mask = (
+                (df_rechazos_all['of_number'] == row['of_number']) &
+                (df_rechazos_all['no_pieza'] == row['no_pieza']) &
+                (df_rechazos_all['area'] == area)
+            )
+            return int(df_rechazos_all[mask]['cantidad'].sum())
             
         df_agrupado['wip'] = df_agrupado.apply(get_wip, axis=1)
         df_agrupado['term'] = df_agrupado.apply(get_terminadas_ant, axis=1)
