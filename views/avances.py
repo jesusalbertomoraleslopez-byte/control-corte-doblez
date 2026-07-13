@@ -272,7 +272,7 @@ def view_avances():
             )
             
             selected_rows = event.selection.rows
-            if selected_rows:
+            if selected_rows and selected_rows[0] < len(df_nidos_list):
                 nido_seleccionado = df_nidos_list.iloc[selected_rows[0]]['Nido']
 
     if is_ingenieria:

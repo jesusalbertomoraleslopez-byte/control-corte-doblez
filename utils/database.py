@@ -34,6 +34,11 @@ def git_sync_db():
                     capture_output=True, timeout=15
                 )
                 if result.returncode == 0:
+                    # Pull con rebase primero para evitar rechazos cuando hay commits más nuevos en remoto
+                    subprocess.run(
+                        ["git", "pull", "--rebase", "origin", "main"],
+                        capture_output=True, timeout=30
+                    )
                     subprocess.run(
                         ["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "push", "origin", "main"],
                         capture_output=True, timeout=30
