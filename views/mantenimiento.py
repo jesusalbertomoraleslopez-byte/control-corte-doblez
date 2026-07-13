@@ -757,6 +757,12 @@ def view_mantenimiento_admin():
                 except Exception:
                     pass
 
+                # Intentar pull con rebase para evitar errores de sincronización por commits remotos más nuevos
+                subprocess.run(
+                    ["git", "pull", "--rebase", "origin", "main"],
+                    capture_output=True, timeout=30
+                )
+
                 res_push = subprocess.run(
                     ["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "push", "origin", "main"],
                     capture_output=True, timeout=30
