@@ -199,16 +199,45 @@ def view_planeacion():
             
             # Configurar columnas del data_editor
             column_config = {
-                "ORDENES DE FABRICACION": st.column_config.TextColumn("ORDENES DE FABRICACION", disabled=True),
-                "CANTIDAD PZS.": st.column_config.NumberColumn("CANTIDAD PZS.", disabled=True),
-                "INICIO": st.column_config.DateColumn("INICIO", required=True, format="DD/MM/YYYY"),
-                "DIAS": st.column_config.NumberColumn("DIAS", min_value=1, step=1, required=True),
-                "FINAL APROXIMADO": st.column_config.DateColumn("FINAL APROXIMADO", disabled=True, format="DD/MM/YYYY"),
-                "AVANCE REAL (CORTE)": st.column_config.TextColumn("AVANCE REAL (CORTE)", disabled=True),
+                "ORDENES DE FABRICACION": st.column_config.TextColumn(
+                    "ORDENES DE FABRICACION", 
+                    disabled=True, 
+                    help="Código único de la Orden de Fabricación."
+                ),
+                "CANTIDAD PZS.": st.column_config.NumberColumn(
+                    "CANTIDAD PZS.", 
+                    disabled=True, 
+                    help="Suma total de piezas programadas en esta OF."
+                ),
+                "INICIO": st.column_config.DateColumn(
+                    "📅 Fecha de Inicio", 
+                    required=True, 
+                    format="DD/MM/YYYY",
+                    help="Haz doble clic para abrir el calendario interactivo y seleccionar la fecha de inicio."
+                ),
+                "DIAS": st.column_config.NumberColumn(
+                    "⏳ Días de Duración", 
+                    min_value=1, 
+                    step=1, 
+                    required=True,
+                    help="Número de días estimados para realizar el corte."
+                ),
+                "FINAL APROXIMADO": st.column_config.DateColumn(
+                    "🏁 Fin Aproximado", 
+                    disabled=True, 
+                    format="DD/MM/YYYY",
+                    help="Fecha estimada de finalización calculada automáticamente."
+                ),
+                "AVANCE REAL (CORTE)": st.column_config.TextColumn(
+                    "📊 Avance Físico Corte", 
+                    disabled=True,
+                    help="Porcentaje real del proceso de corte basado en hojas físicas cortadas."
+                ),
                 "AVANCE": st.column_config.SelectboxColumn(
-                    "AVANCE",
+                    "🔔 Estado Manual",
                     options=["PENDIENTE", "100%", "SE REPROGRAMA FECHA", "PROCESO 1RA. PARTE"],
-                    required=True
+                    required=True,
+                    help="Estado general asignado de forma manual."
                 )
             }
             
@@ -258,28 +287,30 @@ def view_planeacion():
                     
                     # Formato condicional automático para el Gantt según avance real
                     if real_pct >= 100.0:
-                        color_category = "Terminado (100% real)"
+                        color_category = "Completado (100%)"
+                        dias_label = f"{int(row['DIAS'])} días (Completado)"
                     elif real_pct > 0.0:
-                        color_category = "En Proceso (1%-99% real)"
+                        color_category = "En Proceso (1%-99%)"
+                        dias_label = f"{int(row['DIAS'])} días ({real_pct:.0f}% avance)"
                     else:
-                        color_category = "Pendiente (0% real)"
+                        color_category = "Pendiente (0%)"
+                        dias_label = f"{int(row['DIAS'])} días (Pendiente)"
                     
                     gantt_data.append({
                         "OF": of_id,
                         "Start": start_date,
                         "Finish": finish_date,
                         "Estado Real": color_category,
-                        # Ejemplo: "3 días (45% real)"
-                        "Dias": f"{int(row['DIAS'])} días ({real_pct:.0f}% real)"
+                        "Dias": dias_label
                     })
                     
             if gantt_data:
                 df_gantt = pd.DataFrame(gantt_data)
                 
                 color_map = {
-                    "Terminado (100% real)": "#28a745",    # Verde
-                    "En Proceso (1%-99% real)": "#ffc107",  # Amarillo
-                    "Pendiente (0% real)": "#6c757d"        # Gris
+                    "Completado (100%)": "#28a745",    # Verde
+                    "En Proceso (1%-99%)": "#ffc107",  # Amarillo
+                    "Pendiente (0%)": "#6c757d"        # Gris
                 }
                 
                 import plotly.express as px
@@ -296,22 +327,24 @@ def view_planeacion():
                 
                 fig.update_yaxes(autorange="reversed")  # Invertir eje Y para mantener el orden de la tabla
                 fig.update_layout(
-                    plot_bgcolor="#222222",
-                    paper_bgcolor="#111111",
-                    font_color="white",
-                    title_font_size=18,
+                    plot_bgcolor="#ffffff",
+                    paper_bgcolor="#ffffff",
+                    font_color="#222222",
+                    title_font_size=20,
                     title_x=0.5,
-                    margin=dict(l=10, r=10, t=50, b=50),
+                    margin=dict(l=10, r=10, t=60, b=60),
                     showlegend=True,
                     legend_title_text="Estado Real de Avance"
                 )
                 fig.update_xaxes(
                     tickformat="%d/%m/%Y",
-                    gridcolor="#333333"
+                    gridcolor="#e9ecef",
+                    linecolor="#cccccc",
+                    tickfont=dict(color="#333333")
                 )
                 fig.update_traces(
                     textposition="auto",
-                    textfont=dict(color="white", size=13, family="sans-serif")
+                    textfont=dict(size=12, family="sans-serif")
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
