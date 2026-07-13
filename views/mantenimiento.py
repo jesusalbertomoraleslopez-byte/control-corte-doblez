@@ -536,19 +536,29 @@ def view_mantenimiento():
     """, conn_mant)
 
     # Obtener resumen de piezas: planeadas vs registradas en avances Corte
+    # IMPORTANTE: usar subqueries separadas para evitar producto cartesiano al unir piezas+nidos con avances
     df_verif = pd.read_sql_query("""
         SELECT 
-            p.of_number,
-            p.no_pieza,
-            p.nombre_pieza,
-            SUM(p.cantidad * n.hojas) as planeadas,
-            COALESCE(SUM(a.cantidad), 0) as registradas,
-            SUM(p.cantidad * n.hojas) - COALESCE(SUM(a.cantidad), 0) as diferencia
-        FROM piezas p
-        JOIN nidos n ON p.of_number=n.of_number AND p.nido=n.nido
-        LEFT JOIN avances a ON p.of_number=a.of_number AND p.no_pieza=a.no_pieza AND a.area='Corte'
-        GROUP BY p.of_number, p.no_pieza, p.nombre_pieza
-        ORDER BY p.of_number, p.no_pieza
+            plan.of_number,
+            plan.no_pieza,
+            plan.nombre_pieza,
+            plan.planeadas,
+            COALESCE(reg.registradas, 0) as registradas,
+            plan.planeadas - COALESCE(reg.registradas, 0) as diferencia
+        FROM (
+            SELECT p.of_number, p.no_pieza, MAX(p.nombre_pieza) as nombre_pieza,
+                   SUM(p.cantidad * n.hojas) as planeadas
+            FROM piezas p
+            JOIN nidos n ON p.of_number=n.of_number AND p.nido=n.nido
+            GROUP BY p.of_number, p.no_pieza
+        ) plan
+        LEFT JOIN (
+            SELECT of_number, no_pieza, SUM(cantidad) as registradas
+            FROM avances
+            WHERE area='Corte'
+            GROUP BY of_number, no_pieza
+        ) reg ON plan.of_number=reg.of_number AND plan.no_pieza=reg.no_pieza
+        ORDER BY plan.of_number, plan.no_pieza
     """, conn_mant)
     conn_mant.close()
 
