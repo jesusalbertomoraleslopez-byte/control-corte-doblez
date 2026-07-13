@@ -179,10 +179,17 @@ def view_planeacion():
                 "total_piezas": "CANTIDAD PZS."
             }, inplace=True)
             
-            # Agregar avance real calculado en base a hojas físicas
-            df_display["AVANCE REAL (CORTE)"] = df_display["ORDENES DE FABRICACION"].map(
-                lambda x: f"{pct_map.get(x, 0.0):.1f}%"
-            )
+            # Agregar avance real calculado en base a hojas físicas con formato condicional visual (emoji)
+            def get_avance_real_emoji(of_id):
+                pct = pct_map.get(of_id, 0.0)
+                if pct >= 100.0:
+                    return f"🟢 {pct:.1f}%"
+                elif pct > 0.0:
+                    return f"🟡 {pct:.1f}%"
+                else:
+                    return f"⚪ {pct:.1f}%"
+            
+            df_display["AVANCE REAL (CORTE)"] = df_display["ORDENES DE FABRICACION"].map(get_avance_real_emoji)
             
             # Reordenar columnas para posicionar el Avance Real visiblemente
             df_display = df_display[[
@@ -249,11 +256,19 @@ def view_planeacion():
                     of_id = row["ORDENES DE FABRICACION"]
                     real_pct = pct_map.get(of_id, 0.0)
                     
+                    # Formato condicional automático para el Gantt según avance real
+                    if real_pct >= 100.0:
+                        color_category = "Terminado (100% real)"
+                    elif real_pct > 0.0:
+                        color_category = "En Proceso (1%-99% real)"
+                    else:
+                        color_category = "Pendiente (0% real)"
+                    
                     gantt_data.append({
                         "OF": of_id,
                         "Start": start_date,
                         "Finish": finish_date,
-                        "Avance": row["AVANCE"],
+                        "Estado Real": color_category,
                         # Ejemplo: "3 días (45% real)"
                         "Dias": f"{int(row['DIAS'])} días ({real_pct:.0f}% real)"
                     })
@@ -262,10 +277,9 @@ def view_planeacion():
                 df_gantt = pd.DataFrame(gantt_data)
                 
                 color_map = {
-                    "100%": "#28a745",                 # Verde
-                    "PROCESO 1RA. PARTE": "#ffc107",   # Amarillo
-                    "SE REPROGRAMA FECHA": "#dc3545",  # Rojo
-                    "PENDIENTE": "#6c757d"             # Gris
+                    "Terminado (100% real)": "#28a745",    # Verde
+                    "En Proceso (1%-99% real)": "#ffc107",  # Amarillo
+                    "Pendiente (0% real)": "#6c757d"        # Gris
                 }
                 
                 import plotly.express as px
@@ -274,7 +288,7 @@ def view_planeacion():
                     x_start="Start",
                     x_end="Finish",
                     y="OF",
-                    color="Avance",
+                    color="Estado Real",
                     text="Dias",
                     color_discrete_map=color_map,
                     title="DIAGRAMA DE GANTT CORTE LASER"
@@ -289,7 +303,7 @@ def view_planeacion():
                     title_x=0.5,
                     margin=dict(l=10, r=10, t=50, b=50),
                     showlegend=True,
-                    legend_title_text="Estado de Avance"
+                    legend_title_text="Estado Real de Avance"
                 )
                 fig.update_xaxes(
                     tickformat="%d/%m/%Y",
