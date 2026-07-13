@@ -514,8 +514,10 @@ def save_avances_mixto(of_number, nido, area, is_corte, df_terminadas, df_rechaz
                           (row_of, nido, no_pieza, area, cant, motivo, operador, maquina, hoja, now))
                 
     conn.commit()
+    save_db_to_excel(conn)   # ← CRÍTICO: actualizar Excel inmediatamente
     conn.close()
     git_sync_db()
+
 
 def get_total_rechazos(of_number=None):
     conn = get_connection()
