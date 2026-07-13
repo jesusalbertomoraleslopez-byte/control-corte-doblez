@@ -274,80 +274,90 @@ def view_planeacion():
                 st.success("✅ ¡Plan de corte guardado y sincronizado con éxito!")
                 st.rerun()
                 
-            # 3. Dibujar el Diagrama de Gantt
+            # 3. Dibujar el Tablero de Control Gantt (Hoja de cálculo compacta)
             st.markdown("---")
+            st.markdown("### 📊 DIAGRAMA DE GANTT (VISTA COMPACTA)")
+            st.markdown("👇 **Verde = Completado (100%), Amarillo = En Proceso, Gris = Pendiente (0%).**")
             
-            gantt_data = []
-            for idx, row in df_edited.iterrows():
-                if row["INICIO"] and row["DIAS"]:
-                    start_date = pd.to_datetime(row["INICIO"])
-                    finish_date = start_date + pd.to_timedelta(int(row["DIAS"]), unit='D')
-                    of_id = row["ORDENES DE FABRICACION"]
-                    real_pct = pct_map.get(of_id, 0.0)
+            # Obtener el rango de fechas programadas
+            valid_rows = df_edited[df_edited["INICIO"].notna() & df_edited["FINAL APROXIMADO"].notna()].copy()
+            if not valid_rows.empty:
+                # Asegurar de que son objetos date
+                valid_rows["INICIO"] = pd.to_datetime(valid_rows["INICIO"]).dt.date
+                valid_rows["FINAL APROXIMADO"] = pd.to_datetime(valid_rows["FINAL APROXIMADO"]).dt.date
+                
+                min_date = valid_rows["INICIO"].min()
+                max_date = valid_rows["FINAL APROXIMADO"].max()
+                
+                # Generar el rango de fechas
+                date_range = pd.date_range(start=min_date, end=max_date)
+                
+                # Limitar a máximo 45 días para evitar que la tabla sea demasiado ancha
+                if len(date_range) > 45:
+                    date_range = date_range[:45]
                     
-                    # Formato condicional automático para el Gantt según avance real
-                    if real_pct >= 100.0:
-                        color_category = "Completado (100%)"
-                        dias_label = f"{int(row['DIAS'])} días (Completado)"
-                    elif real_pct > 0.0:
-                        color_category = "En Proceso (1%-99%)"
-                        dias_label = f"{int(row['DIAS'])} días ({real_pct:.0f}% avance)"
-                    else:
-                        color_category = "Pendiente (0%)"
-                        dias_label = f"{int(row['DIAS'])} días (Pendiente)"
+                months_es = {1:"ene", 2:"feb", 3:"mar", 4:"abr", 5:"may", 6:"jun", 7:"jul", 8:"ago", 9:"sep", 10:"oct", 11:"nov", 12:"dic"}
+                
+                # Crear los encabezados de fechas (formato DD-mes)
+                date_cols = []
+                date_col_mapping = {}
+                for dt in date_range:
+                    col_name = f"{dt.day:02d}-{months_es[dt.month]}"
+                    date_cols.append(col_name)
+                    date_col_mapping[col_name] = dt.date()
+                
+                # Construir el DataFrame base con las columnas de la izquierda
+                df_gantt_table = df_edited[["ORDENES DE FABRICACION", "INICIO", "FINAL APROXIMADO", "AVANCE REAL (CORTE)"]].copy()
+                
+                # Inicializar las columnas de fecha vacías
+                for col in date_cols:
+                    df_gantt_table[col] = ""
                     
-                    gantt_data.append({
-                        "OF": of_id,
-                        "Start": start_date,
-                        "Finish": finish_date,
-                        "Estado Real": color_category,
-                        "Dias": dias_label
-                    })
+                # Formatear las fechas de la izquierda como strings para visualización
+                df_gantt_table["INICIO"] = df_gantt_table["INICIO"].apply(lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else "")
+                df_gantt_table["FINAL APROXIMADO"] = df_gantt_table["FINAL APROXIMADO"].apply(lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else "")
+                
+                # Definir función de estilizado condicional para las celdas
+                def style_gantt(df_to_style):
+                    # Crear DataFrame de estilos vacíos
+                    styles = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
                     
-            if gantt_data:
-                df_gantt = pd.DataFrame(gantt_data)
+                    for idx, row in df_to_style.iterrows():
+                        of_id = row["ORDENES DE FABRICACION"]
+                        real_pct = pct_map.get(of_id, 0.0)
+                        
+                        # Definir colores del bloque
+                        if real_pct >= 100.0:
+                            cell_style = "background-color: #28a745; color: #28a745;" # Verde
+                        elif real_pct > 0.0:
+                            cell_style = "background-color: #ffc107; color: #ffc107;" # Amarillo
+                        else:
+                            cell_style = "background-color: #a0aab2; color: #a0aab2;" # Gris
+                        
+                        # Obtener fechas del editor usando el índice
+                        row_orig = df_edited.loc[idx]
+                        row_start = row_orig["INICIO"]
+                        row_end = row_orig["FINAL APROXIMADO"]
+                        
+                        if pd.notna(row_start) and pd.notna(row_end):
+                            # Colorear celdas en el rango
+                            for col in date_cols:
+                                col_dt = date_col_mapping[col]
+                                if row_start <= col_dt <= row_end:
+                                    styles.at[idx, col] = cell_style
+                                    
+                    return styles
                 
-                color_map = {
-                    "Completado (100%)": "#28a745",    # Verde
-                    "En Proceso (1%-99%)": "#ffc107",  # Amarillo
-                    "Pendiente (0%)": "#6c757d"        # Gris
-                }
-                
-                import plotly.express as px
-                fig = px.timeline(
-                    df_gantt,
-                    x_start="Start",
-                    x_end="Finish",
-                    y="OF",
-                    color="Estado Real",
-                    text="Dias",
-                    color_discrete_map=color_map,
-                    title="DIAGRAMA DE GANTT CORTE LASER"
+                # Mostrar tabla con estilo aplicado
+                df_gantt_styled = df_gantt_table.style.apply(style_gantt, axis=None)
+                st.dataframe(
+                    df_gantt_styled,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=300
                 )
-                
-                fig.update_yaxes(autorange="reversed")  # Invertir eje Y para mantener el orden de la tabla
-                fig.update_layout(
-                    plot_bgcolor="#ffffff",
-                    paper_bgcolor="#ffffff",
-                    font_color="#222222",
-                    title_font_size=20,
-                    title_x=0.5,
-                    margin=dict(l=10, r=10, t=60, b=60),
-                    showlegend=True,
-                    legend_title_text="Estado Real de Avance"
-                )
-                fig.update_xaxes(
-                    tickformat="%d/%m/%Y",
-                    gridcolor="#e9ecef",
-                    linecolor="#cccccc",
-                    tickfont=dict(color="#333333")
-                )
-                fig.update_traces(
-                    textposition="auto",
-                    textfont=dict(size=12, family="sans-serif")
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("💡 Asigna fechas de inicio y duraciones en la tabla superior para dibujar el diagrama Gantt.")
 
     with tab_carga:
         st.markdown("### 📋 Paso 1: Cargar Plan de Producción")
