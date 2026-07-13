@@ -952,7 +952,7 @@ def generate_wip_excel(ofs):
     df_meta = pd.read_sql_query("SELECT * FROM ordenes", conn)
     conn.close()
     
-    relevant_procs = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+    relevant_procs = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque", "Almacen PT"]
     excel_sheet_names = {
         "Corte": "x-Cortar",
         "Rebabeo": "x-Rebabear",
@@ -960,7 +960,8 @@ def generate_wip_excel(ofs):
         "Barrenado": "x-Barrenar",
         "Pintura": "x-Pintar",
         "Liberado": "x-Liberar",
-        "Empaque": "x-Empacar"
+        "Empaque": "x-Empacar",
+        "Almacen PT": "x-Almacen PT"
     }
     
     consolidado_rows = []

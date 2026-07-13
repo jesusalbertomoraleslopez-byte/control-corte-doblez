@@ -476,7 +476,7 @@ def save_production_plan(of_number, proyecto, programador, fecha, df_nidos, df_p
     cant_col = next((col for col in df_piezas.columns if 'CANTIDAD' in str(col).upper()), None)
     ruta_col = next((col for col in df_piezas.columns if 'RUTA' in str(col).upper()), None)
     
-    default_ruta = "Ingenieria, Corte, Rebabeo, Doblez, Liberado, Empaque"
+    default_ruta = "Ingenieria, Corte, Rebabeo, Doblez, Liberado, Empaque, Almacen PT"
     
     if nido_col_p and pieza_col and cant_col:
         for _, row in df_piezas.iterrows():
@@ -725,7 +725,7 @@ def get_dashboard_stats(of_list=None):
     }
     
     # Progreso por area
-    areas = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Liberado", "Empaque"]
+    areas = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Liberado", "Empaque", "Almacen PT"]
     for area in areas:
         if area == "Ingenieria":
             # Para Ingeniería medimos Partes (of_number+no_pieza únicos) que pasen por Ing
@@ -819,7 +819,7 @@ def check_and_seed_personal_areas(cursor):
         "📐 Doblez": ["Doblez", "Rebabeo", "Barrenado"],
         "🎨 Pintura": ["Pintura"],
         "⚙️ Ingeniería": ["Ingenieria"],
-        "📦 Embarque": ["Empaque", "Liberado"],
+        "📦 Embarque": ["Empaque", "Liberado", "Almacen PT"],
         "👑 Dirección": ["Liberado"]
     }
     
