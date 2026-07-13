@@ -3,30 +3,132 @@ import pandas as pd
 import datetime
 import subprocess
 import threading
+import os
 
-DB_PATH = "sigrama.db"
+EXCEL_DB_PATH = "sigrama_database.xlsx"
+TEMP_DB_PATH = "sigrama_temp.db"
+
+_last_excel_mtime = 0
 
 def git_sync_db():
-    """Hace commit y push de sigrama.db a GitHub en un hilo separado para no bloquear la UI."""
+    """Hace commit y push de sigrama_database.xlsx a GitHub en un hilo separado para no bloquear la UI."""
     def _sync():
         try:
-            subprocess.run(["git", "add", "sigrama.db"], capture_output=True, timeout=15)
-            result = subprocess.run(
-                ["git", "commit", "-m", f"Auto-sync DB {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
-                capture_output=True, timeout=15
-            )
-            # Solo hace push si hubo cambios (exit code 0 = nuevo commit creado)
-            if result.returncode == 0:
-                subprocess.run(["git", "push", "origin", "main"], capture_output=True, timeout=30)
+            if os.path.exists(EXCEL_DB_PATH):
+                subprocess.run(["git", "add", EXCEL_DB_PATH], capture_output=True, timeout=15)
+                result = subprocess.run(
+                    ["git", "commit", "-m", f"Auto-sync DB Excel {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
+                    capture_output=True, timeout=15
+                )
+                if result.returncode == 0:
+                    subprocess.run(["git", "push", "origin", "main"], capture_output=True, timeout=30)
         except Exception:
             pass  # Silencioso: no romper la app si git falla
     threading.Thread(target=_sync, daemon=True).start()
 
-def get_connection():
-    return sqlite3.connect(DB_PATH)
+def save_db_to_excel(conn=None):
+    """Exporta todas las tablas SQLite al archivo Excel sigrama_database.xlsx."""
+    close_at_end = False
+    if conn is None:
+        conn = sqlite3.connect(TEMP_DB_PATH)
+        close_at_end = True
+        
+    tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas"]
+    temp_excel = "sigrama_database_temp.xlsx"
+    try:
+        with pd.ExcelWriter(temp_excel, engine='openpyxl') as writer:
+            for t in tables:
+                try:
+                    df = pd.read_sql_query(f"SELECT * FROM {t}", conn)
+                except Exception:
+                    df = pd.DataFrame()
+                df.to_excel(writer, sheet_name=t, index=False)
+        
+        if os.path.exists(EXCEL_DB_PATH):
+            os.remove(EXCEL_DB_PATH)
+        os.rename(temp_excel, EXCEL_DB_PATH)
+        
+        # Actualizar mtime para evitar re-sincronizaciones locales innecesarias
+        global _last_excel_mtime
+        _last_excel_mtime = os.path.getmtime(EXCEL_DB_PATH)
+    except Exception as e:
+        print(f"Error al guardar base de datos a Excel: {e}")
+        if os.path.exists(temp_excel):
+            try:
+                os.remove(temp_excel)
+            except:
+                pass
+    finally:
+        if close_at_end:
+            conn.close()
 
-def init_db():
-    conn = get_connection()
+def sync_excel_to_sqlite():
+    """Carga los datos del archivo Excel sigrama_database.xlsx a la base SQLite temporal."""
+    init_db_schema()
+    
+    if not os.path.exists(EXCEL_DB_PATH):
+        # Si el Excel no existe, pero existe la base de datos vieja sigrama.db, migramos
+        if os.path.exists("sigrama.db"):
+            try:
+                old_conn = sqlite3.connect("sigrama.db")
+                save_db_to_excel(old_conn)
+                old_conn.close()
+                # Renombramos para evitar migraciones repetidas
+                os.rename("sigrama.db", "sigrama_migrated.db")
+            except Exception as em:
+                print(f"Error al migrar DB vieja: {em}")
+                save_db_to_excel()
+        else:
+            # Si no hay ninguna BD, crear un Excel vacío inicial a partir del esquema
+            save_db_to_excel()
+            return
+        
+    conn = sqlite3.connect(TEMP_DB_PATH)
+    c = conn.cursor()
+    
+    try:
+        excel_file = pd.ExcelFile(EXCEL_DB_PATH)
+        sheets = excel_file.sheet_names
+        
+        tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas"]
+        for t in tables:
+            best_match = next((s for s in sheets if s.lower() == t.lower()), None)
+            if best_match:
+                df = pd.read_excel(excel_file, sheet_name=best_match)
+                c.execute(f"DELETE FROM {t}")
+                if not df.empty:
+                    # Reemplazar valores nulos por None para evitar errores en SQLite
+                    df = df.astype(object).where(pd.notnull(df), None)
+                    df.to_sql(t, conn, if_exists='append', index=False)
+        conn.commit()
+    except Exception as e:
+        print(f"Error al sincronizar Excel a SQLite: {e}")
+    finally:
+        conn.close()
+
+def get_connection():
+    """Obtiene la conexión a la base de datos temporal SQLite, sincronizándola si el Excel cambió."""
+    global _last_excel_mtime
+    
+    if os.path.exists(EXCEL_DB_PATH):
+        mtime = os.path.getmtime(EXCEL_DB_PATH)
+        if mtime > _last_excel_mtime or not os.path.exists(TEMP_DB_PATH):
+            sync_excel_to_sqlite()
+            _last_excel_mtime = mtime
+    else:
+        if not os.path.exists(TEMP_DB_PATH):
+            sync_excel_to_sqlite()
+            
+    conn = sqlite3.connect(TEMP_DB_PATH)
+    return conn
+
+def init_db_schema(conn=None):
+    """Inicializa la estructura de tablas de la base de datos SQLite."""
+    close_at_end = False
+    if conn is None:
+        conn = sqlite3.connect(TEMP_DB_PATH)
+        close_at_end = True
+        
     cursor = conn.cursor()
     
     # 1. Tabla de Órdenes
@@ -36,7 +138,12 @@ def init_db():
             proyecto TEXT,
             programador TEXT,
             fecha TEXT,
-            fecha_carga TEXT
+            fecha_carga TEXT,
+            po TEXT,
+            descripcion_pronest TEXT,
+            calibre TEXT,
+            prioridad TEXT,
+            proyecto_cliente TEXT
         )
     ''')
     
@@ -47,6 +154,7 @@ def init_db():
             of_number TEXT,
             nido TEXT,
             hojas INTEGER,
+            calibre TEXT,
             FOREIGN KEY (of_number) REFERENCES ordenes (of_number)
         )
     ''')
@@ -65,13 +173,7 @@ def init_db():
         )
     ''')
     
-    # Intentar agregar la columna ruta si no existe (para compatibilidad con DBs anteriores)
-    try:
-        cursor.execute("ALTER TABLE piezas ADD COLUMN ruta TEXT")
-    except sqlite3.OperationalError:
-        pass  # La columna ya existe
-    
-    # 4. Tabla de Avances (por Nido, Pieza y Área)
+    # 4. Tabla de Avances
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS avances (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +190,7 @@ def init_db():
         )
     ''')
     
-    # 5. Tabla de Rechazos (por Pieza y Área)
+    # 5. Tabla de Rechazos
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS rechazos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,19 +207,7 @@ def init_db():
             FOREIGN KEY (of_number) REFERENCES ordenes (of_number)
         )
     ''')
-    # Intentar agregar la columna calibre a nidos si no existe (para compatibilidad con DBs anteriores)
-    try:
-        cursor.execute("ALTER TABLE nidos ADD COLUMN calibre TEXT")
-    except sqlite3.OperationalError:
-        pass  # La columna ya existe
-        
-    # Intentar agregar las nuevas columnas a ordenes si no existen (para compatibilidad con DBs anteriores)
-    for col in ["po", "descripcion_pronest", "calibre", "prioridad", "proyecto_cliente"]:
-        try:
-            cursor.execute(f"ALTER TABLE ordenes ADD COLUMN {col} TEXT")
-        except sqlite3.OperationalError:
-            pass  # La columna ya existe
-            
+    
     # 6. Tabla de Áreas de Personal
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS personal_areas (
@@ -126,17 +216,18 @@ def init_db():
             PRIMARY KEY (operador_nombre, area)
         )
     ''')
-            
-    # Sincronizar catálogo de prenomina con áreas de personal
+    
     try:
         check_and_seed_personal_areas(cursor)
-    except Exception as e:
+    except Exception:
         pass
-            
+        
     conn.commit()
-    conn.close()
+    if close_at_end:
+        conn.close()
 
-# --- Funciones de Utilidad (Queries) ---
+def init_db():
+    sync_excel_to_sqlite()
 
 def clear_db():
     """Limpia todas las tablas."""
@@ -145,7 +236,9 @@ def clear_db():
     for t in ["rechazos", "avances", "piezas", "nidos", "ordenes"]:
         c.execute(f"DELETE FROM {t}")
     conn.commit()
+    save_db_to_excel(conn)
     conn.close()
+    git_sync_db()
 
 def clear_avances_rechazos():
     """Limpia solo los registros de producción (avances y rechazos)."""
@@ -154,7 +247,9 @@ def clear_avances_rechazos():
     for t in ["rechazos", "avances"]:
         c.execute(f"DELETE FROM {t}")
     conn.commit()
+    save_db_to_excel(conn)
     conn.close()
+    git_sync_db()
 
 def clear_plans_keep_catalog():
     """Borra ordenes, nidos, avances y rechazos, pero conserva las piezas para mantener el catálogo de rutas."""
@@ -163,7 +258,9 @@ def clear_plans_keep_catalog():
     for t in ["rechazos", "avances", "nidos", "ordenes"]:
         c.execute(f"DELETE FROM {t}")
     conn.commit()
+    save_db_to_excel(conn)
     conn.close()
+    git_sync_db()
 
 def get_active_of():
     """Devuelve la OF más reciente."""
@@ -282,6 +379,7 @@ def save_production_plan(of_number, proyecto, programador, fecha, df_nidos, df_p
                       (of_number, nido_val, pieza_val, nombre_val, cant_val, ruta_val))
             
     conn.commit()
+    save_db_to_excel(conn)
     conn.close()
     git_sync_db()
 
@@ -334,6 +432,7 @@ def update_ruta_piezas(of_number, actualizaciones):
     c.executemany("UPDATE piezas SET ruta = :ruta WHERE of_number = :of_number AND no_pieza = :no_pieza", 
                   [{'of_number': of_number, **d} for d in actualizaciones])
     conn.commit()
+    save_db_to_excel(conn)
     conn.close()
     git_sync_db()
 

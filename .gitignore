@@ -17,3 +17,16 @@ __pycache__/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Databases & Backups (excluding the new Excel database)
+*temp.db
+*temp.xlsx
+*migrated.db
+*backup*.db
+control_produccion.db
+database.db
+produccion.db
+sigrama_backup*.db
+sigrama_temp.db
+sigrama_migrated.db
+sigrama_database_temp.xlsx

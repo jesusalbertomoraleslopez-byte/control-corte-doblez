@@ -455,6 +455,8 @@ def view_mantenimiento_admin():
                                 (op_name, a_name)
                             )
                 conn_save.commit()
+                from utils.database import git_sync_db
+                git_sync_db()
                 st.success("✅ ¡Permisos y autorizaciones de personal guardados con éxito!")
                 st.rerun()
             except Exception as err:
@@ -688,28 +690,34 @@ def view_mantenimiento_admin():
         st.subheader("📥 Descargar Respaldo")
         st.markdown("Guarda una copia completa de toda la información actual (OFs, piezas, avances, scrap y permisos):")
         try:
-            with open("sigrama.db", "rb") as f:
+            from utils.database import save_db_to_excel, EXCEL_DB_PATH
+            save_db_to_excel()
+            with open(EXCEL_DB_PATH, "rb") as f:
                 db_bytes = f.read()
             st.download_button(
-                label="📥 Descargar sigrama.db",
+                label="📥 Descargar sigrama_database.xlsx",
                 data=db_bytes,
-                file_name="sigrama.db",
-                mime="application/octet-stream",
+                file_name="sigrama_database.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 type="primary"
             )
         except Exception as e:
-            st.error(f"No se pudo leer el archivo de base de datos: {e}")
+            st.error(f"No se pudo leer el archivo de base de datos Excel: {e}")
             
     with col_db_ul:
-        st.subheader("📤 Restaurar Base de Datos")
-        st.markdown("Sube tu archivo de respaldo `sigrama.db` para recuperar al 100% todos tus registros en caso de reinicio:")
-        uploaded_db = st.file_uploader("Sube el archivo de respaldo (.db):", type=["db"], key="uploader_restore_db")
+        st.subheader("📤 Restaurar Base de Datos (Excel)")
+        st.markdown("Sube tu archivo de respaldo `sigrama_database.xlsx` para recuperar al 100% todos tus registros:")
+        uploaded_db = st.file_uploader("Sube el archivo de respaldo (.xlsx):", type=["xlsx"], key="uploader_restore_db")
         if uploaded_db is not None:
             if st.button("🚨 Sobrescribir Base de Datos Activa", type="primary", use_container_width=True):
                 try:
-                    with open("sigrama.db", "wb") as f:
+                    from utils.database import EXCEL_DB_PATH, sync_excel_to_sqlite, git_sync_db
+                    with open(EXCEL_DB_PATH, "wb") as f:
                         f.write(uploaded_db.getbuffer())
+                    # Forzar la recarga desde el nuevo Excel
+                    sync_excel_to_sqlite()
+                    git_sync_db()
                     st.success("✅ ¡Base de datos restaurada con éxito! La aplicación se actualizará.")
                     st.rerun()
                 except Exception as e:
@@ -729,9 +737,11 @@ def view_mantenimiento_admin():
         if st.button("🔄 Sincronizar con GitHub", key="sync_git_manually", use_container_width=True, type="primary"):
             import datetime
             try:
-                subprocess.run(["git", "add", "sigrama.db"], capture_output=True, timeout=15)
+                from utils.database import EXCEL_DB_PATH, save_db_to_excel
+                save_db_to_excel()
+                subprocess.run(["git", "add", EXCEL_DB_PATH], capture_output=True, timeout=15)
                 res_commit = subprocess.run(
-                    ["git", "commit", "-m", f"Manual-sync DB {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
+                    ["git", "commit", "-m", f"Manual-sync DB Excel {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
                     capture_output=True, timeout=15
                 )
                 res_push = subprocess.run(["git", "push", "origin", "main"], capture_output=True, timeout=30)
