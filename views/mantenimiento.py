@@ -567,19 +567,49 @@ def view_mantenimiento():
     if df_verif.empty:
         st.info("No hay datos de piezas cargadas.")
     else:
+        # Contar reposiciones por separado (nido=REPOSICION)
+        conn_rep = get_connection()
+        df_repos = pd.read_sql_query("""
+            SELECT of_number, no_pieza, SUM(cantidad) as reposiciones
+            FROM avances WHERE area='Corte' AND nido='REPOSICION'
+            GROUP BY of_number, no_pieza
+        """, conn_rep)
+        conn_rep.close()
+
         total_plan = int(df_verif['planeadas'].sum())
-        total_reg = int(df_verif['registradas'].sum())
-        total_diff = total_plan - total_reg
-        col_v1, col_v2, col_v3 = st.columns(3)
+        total_reg  = int(df_verif['registradas'].sum())
+        total_repos = int(df_repos['reposiciones'].sum()) if not df_repos.empty else 0
+        total_reg_sin_repos = total_reg - total_repos
+        total_diff = total_plan - total_reg_sin_repos
+
+        col_v1, col_v2, col_v3, col_v4 = st.columns(4)
         col_v1.metric("📦 Total Planeado", f"{total_plan:,} pzs")
-        col_v2.metric("✅ Total Registrado en Corte", f"{total_reg:,} pzs")
-        delta_color = "normal" if total_diff == 0 else "inverse"
-        col_v3.metric("⚠️ Diferencia (Pendiente)", f"{total_diff:,} pzs", delta=f"-{total_diff}" if total_diff > 0 else "0", delta_color=delta_color)
+        col_v2.metric("✅ Registrado (nidos)", f"{total_reg_sin_repos:,} pzs")
+        col_v3.metric("🔁 Reposiciones Corte", f"{total_repos:,} pzs",
+                      help="Piezas registradas como re-corte por scrap (nido=REPOSICION). Son adicionales al plan y no afectan el conteo.")
+        if total_diff == 0:
+            col_v4.metric("🎯 Diferencia", "0 pzs ✅")
+        elif total_diff > 0:
+            col_v4.metric("⚠️ Diferencia (Faltantes)", f"{total_diff:,} pzs")
+        else:
+            col_v4.metric("❗ Diferencia (Exceso)", f"{total_diff:,} pzs",
+                          help="Hay más piezas registradas que planeadas. Puede deberse a registros duplicados en algún nido.")
+
+        if total_diff < 0:
+            st.warning(
+                f"❗ **Atención:** Se registraron **{abs(total_diff)} piezas extra** más de las planeadas en Corte. "
+                f"Esto generalmente se debe a **registros duplicados** (misma hoja registrada más de una vez). "
+                f"Revisa el detalle por pieza para identificar el nido con exceso y corrígelo en la sección **5. Correcciones**."
+            )
 
         with st.expander("🔍 Ver detalle por No. Pieza"):
             df_show = df_verif.copy()
             df_show.columns = ['OF', 'No. Pieza', 'Descripción', 'Planeadas', 'Registradas', 'Diferencia']
-            df_show['Estado'] = df_show['Diferencia'].apply(lambda x: '✅ OK' if x <= 0 else f'⚠️ Faltan {int(x)}')
+            def _estado(x):
+                if x == 0: return '✅ OK'
+                if x > 0:  return f'⚠️ Faltan {int(x)}'
+                return f'❗ Exceso {abs(int(x))} (posible duplicado)'
+            df_show['Estado'] = df_show['Diferencia'].apply(_estado)
             st.dataframe(df_show, use_container_width=True, hide_index=True, height=300)
 
     st.markdown("---")
