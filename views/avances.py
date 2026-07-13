@@ -405,14 +405,21 @@ def view_avances():
         df_nido = df_todas[(df_todas['nido'] == actual_nido) & (df_todas['of_number'] == actual_of)].copy()
         total_hojas = int(df_nido['hojas'].iloc[0]) if 'hojas' in df_nido.columns and not df_nido.empty else 1
         
-        # Consultar en DB qué hoja sigue
+        # Consultar en DB qué hojas ya fueron cortadas
         conn = get_connection()
         c = conn.cursor()
-        c.execute("SELECT IFNULL(MAX(hoja), 0) FROM avances WHERE of_number=? AND nido=? AND area='Corte'", (actual_of, actual_nido))
-        ultima_hoja = c.fetchone()[0]
+        c.execute("SELECT DISTINCT hoja FROM avances WHERE of_number=? AND nido=? AND area='Corte' AND hoja IS NOT NULL", (actual_of, actual_nido))
+        hojas_cortadas = {int(row[0]) for row in c.fetchall()}
         conn.close()
         
-        hoja_actual = ultima_hoja + 1
+        # Encontrar la primera hoja pendiente (1-indexed)
+        hoja_actual = 1
+        for h in range(1, total_hojas + 1):
+            if h not in hojas_cortadas:
+                hoja_actual = h
+                break
+        else:
+            hoja_actual = total_hojas + 1
         
         if hoja_actual > total_hojas:
             st.success(f"✅ Todas las hojas ({total_hojas}/{total_hojas}) de este Nesteo ya fueron cortadas.")
@@ -464,17 +471,20 @@ def view_avances():
                         st.stop()
                         
                     with st.spinner("Registrando todas las hojas..."):
+                        registered_count = 0
                         for h in range(hoja_actual, total_hojas + 1):
-                            df_terminadas = edited_df.copy()
-                            df_terminadas["Terminadas"] = df_terminadas["cantidad"]
-                            df_terminadas["of_number"] = actual_of
-                            
-                            df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
-                            if not df_rechazos.empty:
-                                df_rechazos["of_number"] = actual_of
+                            if h not in hojas_cortadas:
+                                df_terminadas = edited_df.copy()
+                                df_terminadas["Terminadas"] = df_terminadas["cantidad"]
+                                df_terminadas["of_number"] = actual_of
                                 
-                            save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, h)
-                    st.success(f"🎉 ¡Hojas {hoja_actual} a {total_hojas} registradas exitosamente en Corte!")
+                                df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
+                                if not df_rechazos.empty:
+                                    df_rechazos["of_number"] = actual_of
+                                    
+                                save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, h)
+                                registered_count += 1
+                    st.success(f"🎉 ¡{registered_count} Hojas registradas exitosamente en Corte!")
                     st.rerun()
 
     elif is_post_corte:
