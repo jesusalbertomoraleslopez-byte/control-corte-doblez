@@ -105,7 +105,7 @@ def view_avances():
     is_corte = (area_seleccionada == "Corte")
     is_post_corte = not is_ingenieria and not is_corte
     
-    nido_seleccionado = "Seleccionar..."
+    nidos_seleccionados = []
     if is_corte:
         # Calcular WIP de Corte: solo contar piezas de nidos AUN NO TERMINADOS
         # Un nido de Corte esta terminado si hojas_cortadas >= hojas_requeridas
@@ -285,14 +285,16 @@ def view_avances():
                 use_container_width=True,
                 hide_index=True,
                 on_select="rerun",
-                selection_mode="single-row",
+                selection_mode="multi-row",
                 key="nido_selector",
                 height=200
             )
             
             selected_rows = event.selection.rows
-            if selected_rows and selected_rows[0] < len(df_nidos_list):
-                nido_seleccionado = df_nidos_list.iloc[selected_rows[0]]['Nido']
+            if selected_rows:
+                for idx in selected_rows:
+                    if idx < len(df_nidos_list):
+                        nidos_seleccionados.append(df_nidos_list.iloc[idx]['Nido'])
 
     if is_ingenieria:
         # Calcular total de piezas requeridas por número de parte
@@ -385,107 +387,165 @@ def view_avances():
                 st.error(f"❌ Error al guardar avances de Ingeniería: {e}")
 
                 
-    elif is_corte and nido_seleccionado != "Seleccionar...":
-        st.markdown(f"### 📋 Detalles del Nido: **{nido_seleccionado}**")
-        
-        actual_of = of_number
-        actual_nido = nido_seleccionado
-        if " | " in nido_seleccionado:
-            actual_of, actual_nido = nido_seleccionado.split(" | ", 1)
+    elif is_corte and nidos_seleccionados:
+        if len(nidos_seleccionados) > 1:
+            st.markdown(f"### 📦 Registro Masivo de Avances: **{len(nidos_seleccionados)} Nidos Seleccionados**")
+            st.info(f"👉 **Nidos seleccionados para completar:** {', '.join(nidos_seleccionados)}")
             
-        # Verificar si este nido ya se completó en esta área
-        df_avances = get_avances_nido(actual_of, actual_nido)
-        areas_terminadas = df_avances['area'].tolist() if not df_avances.empty else []
-        
-        if area_seleccionada in areas_terminadas:
-            st.success(f"✅ Este nido ya fue marcado como TERMINADO en **{area_seleccionada}**.")
-            st.stop() # No permitir registrar de nuevo
-            
-        # Obtener piezas del nido específico
-        df_nido = df_todas[(df_todas['nido'] == actual_nido) & (df_todas['of_number'] == actual_of)].copy()
-        total_hojas = int(df_nido['hojas'].iloc[0]) if 'hojas' in df_nido.columns and not df_nido.empty else 1
-        
-        # Consultar en DB qué hojas ya fueron cortadas
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute("SELECT DISTINCT hoja FROM avances WHERE of_number=? AND nido=? AND area='Corte' AND hoja IS NOT NULL", (actual_of, actual_nido))
-        hojas_cortadas = {int(row[0]) for row in c.fetchall()}
-        conn.close()
-        
-        # Encontrar la primera hoja pendiente (1-indexed)
-        hoja_actual = 1
-        for h in range(1, total_hojas + 1):
-            if h not in hojas_cortadas:
-                hoja_actual = h
-                break
-        else:
-            hoja_actual = total_hojas + 1
-        
-        if hoja_actual > total_hojas:
-            st.success(f"✅ Todas las hojas ({total_hojas}/{total_hojas}) de este Nesteo ya fueron cortadas.")
-        else:
-            st.markdown(f"👇 **CORTE: Registrando Hoja {hoja_actual} de {total_hojas}**")
-            st.markdown(f"Las cantidades mostradas abajo corresponden **solamente a las piezas que salen de esta hoja**.")
-            
-            df_edit = df_nido[['no_pieza', 'nombre_pieza', 'cantidad']].copy()
-            df_edit['Rechazos'] = 0
-            df_edit['Motivo'] = ""
-            
-            edited_df = st.data_editor(
-                df_edit,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "no_pieza": st.column_config.TextColumn("No. Pieza", disabled=True),
-                    "nombre_pieza": st.column_config.TextColumn("Descripción", disabled=True),
-                    "cantidad": st.column_config.NumberColumn("Cantidad (x Hoja)", disabled=True),
-                    "Rechazos": st.column_config.NumberColumn("Cant. Rechazada", min_value=0, step=1),
-                    "Motivo": st.column_config.TextColumn("Motivo de rechazo")
-                },
-                height=200
-            )
-            
-            col_b1, col_b2 = st.columns(2)
-            with col_b1:
-                if st.button(f"✅ Registrar Hoja {hoja_actual} Terminada", type="primary", use_container_width=True):
-                    if not operador.strip():
-                        st.error("⚠️ Por favor selecciona un Operador válido.")
-                        st.stop()
-                        
-                    df_terminadas = edited_df.copy()
-                    df_terminadas["Terminadas"] = df_terminadas["cantidad"] # Avanza exactamente lo de 1 hoja
-                    df_terminadas["of_number"] = actual_of
+            # Botón de registro masivo
+            if st.button(f"⏩ Registrar TODAS las Hojas de los {len(nidos_seleccionados)} Nidos Seleccionados", type="primary", use_container_width=True):
+                if not operador.strip():
+                    st.error("⚠️ Por favor selecciona un Operador válido antes de guardar.")
+                    st.stop()
                     
-                    df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
-                    if not df_rechazos.empty:
-                        df_rechazos["of_number"] = actual_of
+                with st.spinner("Registrando avances de nidos seleccionados..."):
+                    total_nidos_completados = 0
+                    total_hojas_completadas = 0
+                    for nido_item in nidos_seleccionados:
+                        actual_of = of_number
+                        actual_nido = nido_item
+                        if " | " in nido_item:
+                            actual_of, actual_nido = nido_item.split(" | ", 1)
+                            
+                        # Verificar si este nido ya se completó en esta área
+                        df_avances = get_avances_nido(actual_of, actual_nido)
+                        areas_terminadas = df_avances['area'].tolist() if not df_avances.empty else []
+                        if "Corte" in areas_terminadas:
+                            continue
+                            
+                        # Obtener piezas del nido específico
+                        df_nido = df_todas[(df_todas['nido'] == actual_nido) & (df_todas['of_number'] == actual_of)].copy()
+                        if df_nido.empty:
+                            continue
+                        total_hojas = int(df_nido['hojas'].iloc[0]) if 'hojas' in df_nido.columns else 1
                         
-                    save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, hoja_actual)
-                    st.success(f"🎉 ¡Hoja {hoja_actual} registrada en Corte!")
-                    st.rerun()
-            
-            with col_b2:
-                if st.button(f"⏩ Registrar TODAS las Hojas ({hoja_actual} a {total_hojas})", type="secondary", use_container_width=True):
-                    if not operador.strip():
-                        st.error("⚠️ Por favor selecciona un Operador válido.")
-                        st.stop()
+                        # Consultar hojas ya cortadas
+                        conn = get_connection()
+                        c = conn.cursor()
+                        c.execute("SELECT DISTINCT hoja FROM avances WHERE of_number=? AND nido=? AND area='Corte' AND hoja IS NOT NULL", (actual_of, actual_nido))
+                        hojas_cortadas = {int(row[0]) for row in c.fetchall()}
+                        conn.close()
                         
-                    with st.spinner("Registrando todas las hojas..."):
-                        registered_count = 0
-                        for h in range(hoja_actual, total_hojas + 1):
+                        nido_changed = False
+                        # Registrar todas las hojas faltantes para este nido
+                        for h in range(1, total_hojas + 1):
                             if h not in hojas_cortadas:
-                                df_terminadas = edited_df.copy()
+                                df_terminadas = df_nido[['no_pieza', 'nombre_pieza', 'cantidad']].copy()
                                 df_terminadas["Terminadas"] = df_terminadas["cantidad"]
                                 df_terminadas["of_number"] = actual_of
                                 
-                                df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
-                                if not df_rechazos.empty:
-                                    df_rechazos["of_number"] = actual_of
+                                save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, None, operador, maquina, h)
+                                total_hojas_completadas += 1
+                                nido_changed = True
+                        if nido_changed or len(hojas_cortadas) >= total_hojas:
+                            total_nidos_completados += 1
+                            
+                st.success(f"🎉 ¡Sincronización Masiva Completa! Se registraron {total_nidos_completados} nidos y {total_hojas_completadas} hojas exitosamente en Corte.")
+                st.rerun()
+        else:
+            # Caso de un solo nido seleccionado (Lógica tradicional paso a paso)
+            nido_seleccionado = nidos_seleccionados[0]
+            st.markdown(f"### 📋 Detalles del Nido: **{nido_seleccionado}**")
+            
+            actual_of = of_number
+            actual_nido = nido_seleccionado
+            if " | " in nido_seleccionado:
+                actual_of, actual_nido = nido_seleccionado.split(" | ", 1)
+                
+            # Verificar si este nido ya se completó en esta área
+            df_avances = get_avances_nido(actual_of, actual_nido)
+            areas_terminadas = df_avances['area'].tolist() if not df_avances.empty else []
+            
+            if area_seleccionada in areas_terminadas:
+                st.success(f"✅ Este nido ya fue marcado como TERMINADO en **{area_seleccionada}**.")
+                st.stop() # No permitir registrar de nuevo
+                
+            # Obtener piezas del nido específico
+            df_nido = df_todas[(df_todas['nido'] == actual_nido) & (df_todas['of_number'] == actual_of)].copy()
+            total_hojas = int(df_nido['hojas'].iloc[0]) if 'hojas' in df_nido.columns and not df_nido.empty else 1
+            
+            # Consultar en DB qué hojas ya fueron cortadas
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("SELECT DISTINCT hoja FROM avances WHERE of_number=? AND nido=? AND area='Corte' AND hoja IS NOT NULL", (actual_of, actual_nido))
+            hojas_cortadas = {int(row[0]) for row in c.fetchall()}
+            conn.close()
+            
+            # Encontrar la primera hoja pendiente (1-indexed)
+            hoja_actual = 1
+            for h in range(1, total_hojas + 1):
+                if h not in hojas_cortadas:
+                    hoja_actual = h
+                    break
+            else:
+                hoja_actual = total_hojas + 1
+            
+            if hoja_actual > total_hojas:
+                st.success(f"✅ Todas las hojas ({total_hojas}/{total_hojas}) de este Nesteo ya fueron cortadas.")
+            else:
+                st.markdown(f"👇 **CORTE: Registrando Hoja {hoja_actual} de {total_hojas}**")
+                st.markdown(f"Las cantidades mostradas abajo corresponden **solamente a las piezas que salen de esta hoja**.")
+                
+                df_edit = df_nido[['no_pieza', 'nombre_pieza', 'cantidad']].copy()
+                df_edit['Rechazos'] = 0
+                df_edit['Motivo'] = ""
+                
+                edited_df = st.data_editor(
+                    df_edit,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "no_pieza": st.column_config.TextColumn("No. Pieza", disabled=True),
+                        "nombre_pieza": st.column_config.TextColumn("Descripción", disabled=True),
+                        "cantidad": st.column_config.NumberColumn("Cantidad (x Hoja)", disabled=True),
+                        "Rechazos": st.column_config.NumberColumn("Cant. Rechazada", min_value=0, step=1),
+                        "Motivo": st.column_config.TextColumn("Motivo de rechazo")
+                    },
+                    height=200
+                )
+                
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    if st.button(f"✅ Registrar Hoja {hoja_actual} Terminada", type="primary", use_container_width=True):
+                        if not operador.strip():
+                            st.error("⚠️ Por favor selecciona un Operador válido.")
+                            st.stop()
+                            
+                        df_terminadas = edited_df.copy()
+                        df_terminadas["Terminadas"] = df_terminadas["cantidad"] # Avanza exactamente lo de 1 hoja
+                        df_terminadas["of_number"] = actual_of
+                        
+                        df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
+                        if not df_rechazos.empty:
+                            df_rechazos["of_number"] = actual_of
+                            
+                        save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, hoja_actual)
+                        st.success(f"🎉 ¡Hoja {hoja_actual} registrada en Corte!")
+                        st.rerun()
+                
+                with col_b2:
+                    if st.button(f"⏩ Registrar TODAS las Hojas ({hoja_actual} a {total_hojas})", type="secondary", use_container_width=True):
+                        if not operador.strip():
+                            st.error("⚠️ Por favor selecciona un Operador válido.")
+                            st.stop()
+                            
+                        with st.spinner("Registrando todas las hojas..."):
+                            registered_count = 0
+                            for h in range(hoja_actual, total_hojas + 1):
+                                if h not in hojas_cortadas:
+                                    df_terminadas = edited_df.copy()
+                                    df_terminadas["Terminadas"] = df_terminadas["cantidad"]
+                                    df_terminadas["of_number"] = actual_of
                                     
-                                save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, h)
-                                registered_count += 1
-                    st.success(f"🎉 ¡{registered_count} Hojas registradas exitosamente en Corte!")
-                    st.rerun()
+                                    df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
+                                    if not df_rechazos.empty:
+                                        df_rechazos["of_number"] = actual_of
+                                        
+                                    save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, h)
+                                    registered_count += 1
+                        st.success(f"🎉 ¡{registered_count} Hojas registradas exitosamente en Corte!")
+                        st.rerun()
+
 
     elif is_post_corte:
         st.markdown(f"### 📋 Números de Parte de la OF: **{of_number}**")
