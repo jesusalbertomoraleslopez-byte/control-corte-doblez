@@ -192,6 +192,8 @@ def view_mantenimiento_admin():
                     c.execute("DELETE FROM avances WHERE of_number = ?", (of_to_delete,))
                     c.execute("DELETE FROM rechazos WHERE of_number = ?", (of_to_delete,))
                     conn.commit()
+                    from utils.database import git_sync_db
+                    git_sync_db()
                     
                     # Si era la OF activa en sesión, limpiar de sesión
                     if st.session_state.get("of_number") == of_to_delete:
@@ -235,6 +237,51 @@ def view_mantenimiento_admin():
                     st.error(f"Error al resetear avances de la orden: {e}")
                 finally:
                     conn.close()
+
+        # --- REINICIO Y LIMPIEZA COMPLETA DEL SISTEMA ---
+        st.markdown("---")
+        st.header("🧹 Reinicio y Limpieza Completa del Sistema")
+        st.markdown("Si deseas reiniciar la aplicación desde cero para iniciar una nueva temporada o recargar múltiples órdenes:")
+        
+        col_clean1, col_clean2 = st.columns(2)
+        
+        with col_clean1:
+            st.subheader("📋 Limpiar Planes (Mantener Catálogo)")
+            st.write("Borra todas las OFs, nidos, avances y rechazos, pero **conserva las rutas y procesos** configurados en el catálogo de piezas.")
+            confirm_keep_cat = st.checkbox("Confirmar: deseo limpiar planes pero conservar el catálogo de piezas", key="chk_keep_cat")
+            if st.button("🗑️ Limpiar Planes (Mantener Catálogo)", type="secondary", disabled=not confirm_keep_cat, use_container_width=True):
+                try:
+                    clear_plans_keep_catalog()
+                    keys_to_clear = ['production_data', 'of_number', 'wip_data',
+                                     'input_proyecto', 'input_programador', 'uploaded_excel']
+                    for k in keys_to_clear:
+                        if k in st.session_state:
+                            del st.session_state[k]
+                    from utils.database import git_sync_db
+                    git_sync_db()
+                    st.success("✅ ¡Planes de producción y avances eliminados! El catálogo de rutas se conservó.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+                    
+        with col_clean2:
+            st.subheader("🚨 Vaciar Base de Datos (Limpiar Todo)")
+            st.write("Borra **completamente** la base de datos: elimina todas las OFs, nidos, piezas, avances, rechazos e historial.")
+            confirm_clear_all = st.checkbox("Confirmar: deseo borrar TODO y reiniciar la app vacía", key="chk_clear_all_db")
+            if st.button("🚨 Borrar Todo el Sistema", type="primary", disabled=not confirm_clear_all, use_container_width=True):
+                try:
+                    clear_db()
+                    keys_to_clear = ['production_data', 'of_number', 'wip_data',
+                                     'input_proyecto', 'input_programador', 'uploaded_excel']
+                    for k in keys_to_clear:
+                        if k in st.session_state:
+                            del st.session_state[k]
+                    from utils.database import git_sync_db
+                    git_sync_db()
+                    st.success("🚨 ¡Base de datos vaciada por completo! El sistema está limpio.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
     st.markdown("---")
     st.header("📅 Redistribuir Fechas de Avances (Simulación Histórica)")
@@ -320,72 +367,7 @@ def view_mantenimiento_admin():
                 finally:
                     conn.close()
                     
-    st.markdown("---")
 
-    with st.expander("⚠️ Zona de Peligro — Acciones Irreversibles (Solo Administrador)"):
-        st.warning("⚠️ **ATENCIÓN**: Las acciones de esta sección son **permanentes e irreversibles**. Asegúrate de tener un respaldo descargado antes de continuar.")
-        st.markdown("---")
-
-        # --- LIMPIAR PLANES MANTENIENDO CATALOGO ---
-        st.subheader("📋 Limpiar Planes (Mantener Catálogo de Piezas)")
-        st.info(
-            """
-            **¿Qué hace esta opción?**
-            - Borra avances, rechazos, nidos y las órdenes de fabricación (OFs).
-            - **Conserva el catálogo de piezas** con las rutas y procesos que ya configuraste.
-
-            *Ideal para iniciar una nueva temporada de producción sin perder las rutas ya configuradas.*
-            """
-        )
-
-        confirm_plans = st.checkbox("Confirmar: entiendo que esta acción borrará avances, nidos y OFs", key="confirm_plans_chk")
-
-        if st.button("🗑️ Limpiar Planes (Mantener Catálogo de Piezas)", type="secondary", disabled=not confirm_plans, use_container_width=True):
-            try:
-                clear_plans_keep_catalog()
-                keys_to_clear = ['production_data', 'of_number', 'wip_data',
-                                 'input_proyecto', 'input_programador', 'uploaded_excel']
-                for k in keys_to_clear:
-                    if k in st.session_state:
-                        del st.session_state[k]
-                from utils.database import git_sync_db
-                git_sync_db()
-                st.success("✅ Planes de trabajo, nidos y registros eliminados. El catálogo de piezas se conservó.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al limpiar planes: {e}")
-
-        st.markdown("---")
-
-        # --- ELIMINAR TODO ---
-        st.subheader("🚨 Eliminar Todo (Base en Blanco / Borrar todas las OFs y Avances)")
-        st.warning(
-            """
-            **¿Qué hace esta opción?**
-            - Borra por completo toda la base de datos (`sigrama.db`).
-            - Elimina todas las órdenes de fabricación (OFs), nidos, catálogo de piezas, avances e historiales de scrap.
-            - Restablece el sistema a un estado inicial completamente limpio.
-
-            *Úselo únicamente si desea limpiar el sistema por completo para cargar nuevas OFs desde cero.*
-            """
-        )
-
-        confirm_all = st.checkbox("Confirmar: entiendo que esta acción borrará TODO el sistema de forma permanente", key="confirm_all_chk")
-
-        if st.button("🚨 Borrar Todo el Sistema", type="primary", disabled=not confirm_all, use_container_width=True):
-            try:
-                clear_db()
-                keys_to_clear = ['production_data', 'of_number', 'wip_data',
-                                 'input_proyecto', 'input_programador', 'uploaded_excel']
-                for k in keys_to_clear:
-                    if k in st.session_state:
-                        del st.session_state[k]
-                from utils.database import git_sync_db
-                git_sync_db()
-                st.success("🚨 ¡Toda la base de datos ha sido borrada! El sistema ha vuelto a su estado inicial limpio.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al vaciar la base de datos: {e}")
 
 
     st.header("👥 Áreas Autorizadas por Colaborador")
