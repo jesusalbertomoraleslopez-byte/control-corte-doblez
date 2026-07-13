@@ -345,10 +345,44 @@ def view_mantenimiento_admin():
                 for k in keys_to_clear:
                     if k in st.session_state:
                         del st.session_state[k]
+                from utils.database import git_sync_db
+                git_sync_db()
                 st.success("✅ Planes de trabajo, nidos y registros eliminados. El catálogo de piezas se conservó.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al limpiar planes: {e}")
+
+        st.markdown("---")
+
+        # --- ELIMINAR TODO ---
+        st.subheader("🚨 Eliminar Todo (Base en Blanco / Borrar todas las OFs y Avances)")
+        st.warning(
+            """
+            **¿Qué hace esta opción?**
+            - Borra por completo toda la base de datos (`sigrama.db`).
+            - Elimina todas las órdenes de fabricación (OFs), nidos, catálogo de piezas, avances e historiales de scrap.
+            - Restablece el sistema a un estado inicial completamente limpio.
+
+            *Úselo únicamente si desea limpiar el sistema por completo para cargar nuevas OFs desde cero.*
+            """
+        )
+
+        confirm_all = st.checkbox("Confirmar: entiendo que esta acción borrará TODO el sistema de forma permanente", key="confirm_all_chk")
+
+        if st.button("🚨 Borrar Todo el Sistema", type="primary", disabled=not confirm_all, use_container_width=True):
+            try:
+                clear_db()
+                keys_to_clear = ['production_data', 'of_number', 'wip_data',
+                                 'input_proyecto', 'input_programador', 'uploaded_excel']
+                for k in keys_to_clear:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                from utils.database import git_sync_db
+                git_sync_db()
+                st.success("🚨 ¡Toda la base de datos ha sido borrada! El sistema ha vuelto a su estado inicial limpio.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al vaciar la base de datos: {e}")
 
 
     st.header("👥 Áreas Autorizadas por Colaborador")
