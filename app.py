@@ -149,6 +149,7 @@ def render_sidebar():
     av_rebabeo = av_dict.get("Rebabeo", 0)
     av_doblez = av_dict.get("Doblez", 0)
     av_barrenado = av_dict.get("Barrenado", 0)
+    av_pintura = av_dict.get("Pintura", 0)
     av_liberado = av_dict.get("Liberado", 0)
     av_empaque = av_dict.get("Empaque", 0)
     
@@ -156,6 +157,7 @@ def render_sidebar():
     wip_rebabeo = wip_data.get("Rebabeo", 0)
     wip_doblez = wip_data.get("Doblez", 0)
     wip_barrenado = wip_data.get("Barrenado", 0)
+    wip_pintura = wip_data.get("Pintura", 0)
     wip_liberado = wip_data.get("Liberado", 0)
     wip_empaque = wip_data.get("Empaque", 0)
     
@@ -168,8 +170,9 @@ def render_sidebar():
             <div><b>Rebabeo:</b> {av_rebabeo:,}</div>
             <div><b>Doblez:</b> {av_doblez:,}</div>
             <div><b>Barrenado:</b> {av_barrenado:,}</div>
+            <div><b>Pintura:</b> {av_pintura:,}</div>
             <div><b>Liberado:</b> {av_liberado:,}</div>
-            <div style="grid-column: span 2;"><b>Empaque:</b> {av_empaque:,}</div>
+            <div><b>Empaque:</b> {av_empaque:,}</div>
         </div>
     </div>
 
@@ -180,6 +183,7 @@ def render_sidebar():
             <div><b>Rebabeo:</b> {wip_rebabeo:,}</div>
             <div><b>Doblez:</b> {wip_doblez:,}</div>
             <div><b>Barrenado:</b> {wip_barrenado:,}</div>
+            <div><b>Pintura:</b> {wip_pintura:,}</div>
             <div><b>Liberado:</b> {wip_liberado:,}</div>
             <div style="grid-column: span 2;"><b>Empaque:</b> {wip_empaque:,}</div>
         </div>
@@ -189,8 +193,36 @@ def render_sidebar():
     
     st.sidebar.markdown("---")
 
-    if st.sidebar.button("Cerrar Sesión"):
-        logout()
+    col_out1, col_out2 = st.sidebar.columns(2)
+    with col_out1:
+        if st.button("🔄 Sincronizar", use_container_width=True, key="sidebar_sync_btn"):
+            with st.spinner("Sincronizando..."):
+                try:
+                    import subprocess
+                    import datetime
+                    from utils.database import EXCEL_DB_PATH, save_db_to_excel
+                    save_db_to_excel()
+                    
+                    subprocess.run(["git", "add", EXCEL_DB_PATH], capture_output=True, timeout=15)
+                    res_commit = subprocess.run(
+                        ["git", "commit", "-m", f"Manual-sync sidebar {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
+                        capture_output=True, timeout=15
+                    )
+                    res_push = subprocess.run(["git", "push", "origin", "main"], capture_output=True, timeout=30)
+                    
+                    if res_push.returncode == 0:
+                        st.toast("✅ ¡Sincronizado con éxito!", icon="🚀")
+                        st.balloons()
+                    elif res_commit.returncode != 0:
+                        st.toast("ℹ️ No hay cambios para subir.", icon="ℹ️")
+                    else:
+                        st.toast("❌ Error en conexión con GitHub.", icon="⚠️")
+                except Exception as e:
+                    st.toast(f"❌ Error: {e}", icon="🚨")
+                    
+    with col_out2:
+        if st.button("🚪 Salir", use_container_width=True, key="sidebar_logout_btn"):
+            logout()
         
     # Slogan inferior
     slogan_path = os.path.join(os.path.dirname(__file__), "assets", "slogan.png")
