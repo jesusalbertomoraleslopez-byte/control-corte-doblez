@@ -58,16 +58,27 @@ def logout():
 
 def get_sidebar_stats():
     try:
-        from utils.database import get_connection
+        from utils.database import get_connection, get_active_of
         from views.reportes import calculate_global_wip
+        
+        active_of = get_active_of()
+        if not active_of:
+            return {}, {}, "Ninguna"
+            
+        of_num = active_of['of_number']
         conn = get_connection()
-        df_avances = pd.read_sql_query("SELECT area, SUM(cantidad) as cantidad FROM avances GROUP BY area", conn)
-        wip_data = calculate_global_wip("Todas")
+        df_avances = pd.read_sql_query(
+            "SELECT area, SUM(cantidad) as cantidad FROM avances WHERE of_number = ? GROUP BY area", 
+            conn, 
+            params=(of_num,)
+        )
+        wip_data = calculate_global_wip(of_num)
         conn.close()
+        
         av_dict = df_avances.set_index('area')['cantidad'].to_dict() if not df_avances.empty else {}
-        return av_dict, wip_data
+        return av_dict, wip_data, of_num
     except Exception:
-        return {}, {}
+        return {}, {}, "Ninguna"
 
 # --- Menú Lateral ---
 def render_sidebar():
@@ -116,7 +127,7 @@ def render_sidebar():
     
     st.sidebar.markdown("---")
 
-    av_dict, wip_data = get_sidebar_stats()
+    av_dict, wip_data, active_of_name = get_sidebar_stats()
     
     av_ingenieria = av_dict.get("Ingenieria", 0)
     av_corte = av_dict.get("Corte", 0)
@@ -135,7 +146,7 @@ def render_sidebar():
     
     stats_html = f"""
     <div style="background-color: #1a1a1a; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #32CD32; font-family: 'Questrial', sans-serif;">
-        <p style="margin: 0; font-size: 0.85rem; color: #aaa; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">📈 AVANCES REGISTRADOS</p>
+        <p style="margin: 0; font-size: 0.82rem; color: #aaa; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">📈 AVANCES: {active_of_name}</p>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.75rem; color: #fff; margin-top: 8px;">
             <div><b>Ingeniería:</b> {av_ingenieria:,}</div>
             <div><b>Corte:</b> {av_corte:,}</div>
@@ -148,7 +159,7 @@ def render_sidebar():
     </div>
 
     <div style="background-color: #1a1a1a; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #EC2024; font-family: 'Questrial', sans-serif;">
-        <p style="margin: 0; font-size: 0.85rem; color: #aaa; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">🏭 WIP REGISTRADO (EN PISO)</p>
+        <p style="margin: 0; font-size: 0.82rem; color: #aaa; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">🏭 WIP EN PISO: {active_of_name}</p>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.75rem; color: #fff; margin-top: 8px;">
             <div><b>Corte:</b> {wip_corte:,}</div>
             <div><b>Rebabeo:</b> {wip_rebabeo:,}</div>
