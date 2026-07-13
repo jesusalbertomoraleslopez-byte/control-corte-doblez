@@ -129,7 +129,7 @@ def view_planeacion():
         
         # 2. Obtener los datos de planificación de la tabla ordenes
         df_ordenes_gantt = pd.read_sql_query("""
-            SELECT of_number, gantt_inicio, gantt_dias, gantt_avance
+            SELECT of_number, proyecto, programador, po, prioridad, calibre, proyecto_cliente, gantt_inicio, gantt_dias, gantt_avance
             FROM ordenes
         """, conn)
         
@@ -173,7 +173,26 @@ def view_planeacion():
                 
             df_prog["FINAL APROXIMADO"] = df_prog.apply(calc_final, axis=1)
             
-            df_display = df_prog[["of_number", "total_piezas", "INICIO", "DIAS", "FINAL APROXIMADO", "AVANCE"]].copy()
+            # Generar texto consolidado de detalles de la OF para el cliente
+            def get_of_consolidated_details(row):
+                parts = []
+                if pd.notna(row["po"]) and str(row["po"]).strip():
+                    parts.append(f"PO: {str(row['po']).strip()}")
+                if pd.notna(row["proyecto_cliente"]) and str(row["proyecto_cliente"]).strip():
+                    parts.append(f"Proy. Cliente: {str(row['proyecto_cliente']).strip()}")
+                elif pd.notna(row["proyecto"]) and str(row["proyecto"]).strip():
+                    parts.append(f"Proy: {str(row['proyecto']).strip()}")
+                if pd.notna(row["total_piezas"]) and row["total_piezas"] > 0:
+                    parts.append(f"Pzs: {int(row['total_piezas'])}")
+                if pd.notna(row["prioridad"]) and str(row["prioridad"]).strip():
+                    parts.append(f"Prioridad: {str(row['prioridad']).strip()}")
+                if pd.notna(row["calibre"]) and str(row["calibre"]).strip():
+                    parts.append(f"Cal: {str(row['calibre']).strip()}")
+                return " | ".join(parts) if parts else "Sin detalles"
+            
+            df_prog["INFORMACIÓN DE LA OF"] = df_prog.apply(get_of_consolidated_details, axis=1)
+            
+            df_display = df_prog[["of_number", "INFORMACIÓN DE LA OF", "total_piezas", "INICIO", "DIAS", "FINAL APROXIMADO", "AVANCE"]].copy()
             df_display.rename(columns={
                 "of_number": "ORDENES DE FABRICACION",
                 "total_piezas": "CANTIDAD PZS."
@@ -193,7 +212,7 @@ def view_planeacion():
             
             # Reordenar columnas para posicionar el Avance Real visiblemente
             df_display = df_display[[
-                "ORDENES DE FABRICACION", "CANTIDAD PZS.", "INICIO", "DIAS", 
+                "ORDENES DE FABRICACION", "INFORMACIÓN DE LA OF", "CANTIDAD PZS.", "INICIO", "DIAS", 
                 "FINAL APROXIMADO", "AVANCE REAL (CORTE)", "AVANCE"
             ]]
             
@@ -203,6 +222,11 @@ def view_planeacion():
                     "ORDENES DE FABRICACION", 
                     disabled=True, 
                     help="Código único de la Orden de Fabricación."
+                ),
+                "INFORMACIÓN DE LA OF": st.column_config.TextColumn(
+                    "📝 Información Consolidada", 
+                    disabled=True, 
+                    help="Detalle consolidado de la OF (PO, Cliente, Proyecto, Calibre, Prioridad)."
                 ),
                 "CANTIDAD PZS.": st.column_config.NumberColumn(
                     "CANTIDAD PZS.", 
@@ -307,7 +331,7 @@ def view_planeacion():
                     date_col_mapping[col_name] = dt.date()
                 
                 # Construir el DataFrame base con las columnas de la izquierda
-                df_gantt_table = df_edited[["ORDENES DE FABRICACION", "INICIO", "FINAL APROXIMADO", "AVANCE REAL (CORTE)"]].copy()
+                df_gantt_table = df_edited[["ORDENES DE FABRICACION", "INFORMACIÓN DE LA OF", "INICIO", "FINAL APROXIMADO", "AVANCE REAL (CORTE)"]].copy()
                 
                 # Inicializar las columnas de fecha vacías
                 for col in date_cols:
@@ -350,7 +374,8 @@ def view_planeacion():
                 
                 # Configurar anchos de columna súper compactos para que todo quepa en una sola pantalla sin scroll horizontal
                 column_config_gantt = {
-                    "ORDENES DE FABRICACION": st.column_config.TextColumn("OF", width=130),
+                    "ORDENES DE FABRICACION": st.column_config.TextColumn("OF", width=100),
+                    "INFORMACIÓN DE LA OF": st.column_config.TextColumn("Información de la OF", width=240),
                     "INICIO": st.column_config.TextColumn("Inicio", width=80),
                     "FINAL APROXIMADO": st.column_config.TextColumn("Final", width=80),
                     "AVANCE REAL (CORTE)": st.column_config.TextColumn("Avance", width=80)
@@ -420,7 +445,8 @@ def view_planeacion():
                     <table style="border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 11px; margin-top: 15px; border: 1px solid #ddd; table-layout: fixed;">
                         <thead>
                             <tr style="background-color: #EC2024; color: white;">
-                                <th style="padding: 8px; border: 1px solid #ddd; text-align: left; width: 120px;">OF</th>
+                                <th style="padding: 8px; border: 1px solid #ddd; text-align: left; width: 90px;">OF</th>
+                                <th style="padding: 8px; border: 1px solid #ddd; text-align: left; width: 220px;">Información de la OF</th>
                                 <th style="padding: 8px; border: 1px solid #ddd; text-align: center; width: 65px;">Inicio</th>
                                 <th style="padding: 8px; border: 1px solid #ddd; text-align: center; width: 65px;">Final</th>
                                 <th style="padding: 8px; border: 1px solid #ddd; text-align: center; width: 55px;">Avance</th>
@@ -435,6 +461,7 @@ def view_planeacion():
                     """
                     for idx, row in df_edited.iterrows():
                         of_id = row["ORDENES DE FABRICACION"]
+                        of_info = row["INFORMACIÓN DE LA OF"]
                         inicio_str = row["INICIO"].strftime("%d/%m/%Y") if row["INICIO"] else ""
                         final_str = row["FINAL APROXIMADO"].strftime("%d/%m/%Y") if row["FINAL APROXIMADO"] else ""
                         real_pct = pct_map.get(of_id, 0.0)
@@ -453,6 +480,7 @@ def view_planeacion():
                         html_table += f"""
                             <tr>
                                 <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{of_id}</td>
+                                <td style="padding: 6px; border: 1px solid #ddd; font-size: 10px; color: #555; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{of_info}</td>
                                 <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">{inicio_str}</td>
                                 <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">{final_str}</td>
                                 <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">{badge}</td>
