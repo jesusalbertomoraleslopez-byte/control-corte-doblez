@@ -113,9 +113,9 @@ def sync_and_push_db():
         capture_output=True, timeout=15
     )
 
-    # Push
+    # Push utilizando HEAD:main para asegurar que funcione incluso si el contenedor está en HEAD desasociado (detached HEAD)
     res_push = subprocess.run(
-        ["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "push", "origin", "main"],
+        ["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "push", "origin", "HEAD:main"],
         capture_output=True, timeout=30
     )
     return res_commit, res_push
