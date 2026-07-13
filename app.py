@@ -102,16 +102,7 @@ def render_sidebar():
     choice = st.sidebar.radio("Navegación", menu)
     
     st.sidebar.markdown("---")
-    st.sidebar.markdown("**🗑️ Acciones Rápidas**")
-    if st.sidebar.button("🗑️ Limpiar Registros / Nueva OF", use_container_width=True):
-        keys_to_clear = ['production_data', 'of_number', 'wip_data',
-                         'input_proyecto', 'input_programador', 'uploaded_excel']
-        for k in keys_to_clear:
-            if k in st.session_state:
-                del st.session_state[k]
-        st.rerun()
-    
-    st.sidebar.markdown("---")
+
     if st.sidebar.button("Cerrar Sesión"):
         logout()
         

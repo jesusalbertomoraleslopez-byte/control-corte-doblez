@@ -289,98 +289,38 @@ def view_mantenimiento():
                     conn.close()
                     
     st.markdown("---")
-    
-    col_reset, col_plans, col_delete = st.columns(3)
-    
-    # --- RESETEAR REGISTROS ---
-    with col_reset:
-        st.subheader("🔄 Resetear Avances y Rechazos")
-        st.info(
-            """
-            **¿Qué hace esta opción?**
-            - Borra todos los avances reportados por los operadores.
-            - Borra todos los rechazos (scrap) reportados.
-            - **Mantiene intactos** la OF activa, los nidos y las piezas actuales.
-            
-            *Ideal para reiniciar mediciones sobre la misma orden cargada.*
-            """
-        )
-        
-        # Confirmación de seguridad
-        confirm_reset = st.checkbox("Confirmar resetear avances/rechazos", key="confirm_reset_chk")
-        
-        if st.button("🗑️ Resetear Avances/Rechazos", type="primary", disabled=not confirm_reset, use_container_width=True):
-            try:
-                clear_avances_rechazos()
-                st.success("✅ ¡Avances y rechazos eliminados con éxito!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al resetear registros: {e}")
-                
-    # --- LIMPIAR PLANES MANTENIENDO CATALOGO ---
-    with col_plans:
-        st.subheader("📋 Limpiar Planes (Mantener Catálogo)")
+
+    with st.expander("⚠️ Zona de Peligro — Acciones Irreversibles (Solo Administrador)"):
+        st.warning("⚠️ **ATENCIÓN**: Las acciones de esta sección son **permanentes e irreversibles**. Asegúrate de tener un respaldo descargado antes de continuar.")
+        st.markdown("---")
+
+        # --- LIMPIAR PLANES MANTENIENDO CATALOGO ---
+        st.subheader("📋 Limpiar Planes (Mantener Catálogo de Piezas)")
         st.info(
             """
             **¿Qué hace esta opción?**
             - Borra avances, rechazos, nidos y las órdenes de fabricación (OFs).
             - **Conserva el catálogo de piezas** con las rutas y procesos que ya configuraste.
-            
-            *Ideal para limpiar el plan de trabajo actual pero sin perder el historial de rutas de las piezas.*
+
+            *Ideal para iniciar una nueva temporada de producción sin perder las rutas ya configuradas.*
             """
         )
-        
-        # Confirmación de seguridad
-        confirm_plans = st.checkbox("Confirmar limpiar planes de trabajo", key="confirm_plans_chk")
-        
-        if st.button("🗑️ Limpiar Planes (Mantener Piezas)", type="primary", disabled=not confirm_plans, use_container_width=True):
+
+        confirm_plans = st.checkbox("Confirmar: entiendo que esta acción borrará avances, nidos y OFs", key="confirm_plans_chk")
+
+        if st.button("🗑️ Limpiar Planes (Mantener Catálogo de Piezas)", type="secondary", disabled=not confirm_plans, use_container_width=True):
             try:
                 clear_plans_keep_catalog()
-                
-                # Limpiar variables de sesión relacionadas
                 keys_to_clear = ['production_data', 'of_number', 'wip_data',
                                  'input_proyecto', 'input_programador', 'uploaded_excel']
                 for k in keys_to_clear:
                     if k in st.session_state:
                         del st.session_state[k]
-                        
                 st.success("✅ Planes de trabajo, nidos y registros eliminados. El catálogo de piezas se conservó.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al limpiar planes: {e}")
-                
-    # --- ELIMINAR TODO ---
-    with col_delete:
-        st.subheader("🚨 Eliminar Todo (Base en Blanco)")
-        st.warning(
-            """
-            **¿Qué hace esta opción?**
-            - Borra por completo toda la base de datos (`sigrama.db`).
-            - Elimina órdenes de fabricación, nidos, catálogo de piezas e historiales.
-            - Restablece el sistema a un estado inicial limpio.
-            
-            *Úselo únicamente si desea limpiar el sistema por completo desde cero.*
-            """
-        )
-        
-        # Confirmación de seguridad
-        confirm_all = st.checkbox("Confirmar borrar TODO el sistema", key="confirm_all_chk")
-        
-        if st.button("🚨 Borrar Todo el Sistema", type="primary", disabled=not confirm_all, use_container_width=True):
-            try:
-                clear_db()
-                
-                # Limpiar variables de sesión relacionadas
-                keys_to_clear = ['production_data', 'of_number', 'wip_data',
-                                 'input_proyecto', 'input_programador', 'uploaded_excel']
-                for k in keys_to_clear:
-                    if k in st.session_state:
-                        del st.session_state[k]
-                        
-                st.success("🚨 ¡Toda la base de datos ha sido borrada! El sistema ha vuelto a su estado inicial.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al vaciar la base de datos: {e}")
+
 
     st.header("👥 Áreas Autorizadas por Colaborador")
     st.markdown(
