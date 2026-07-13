@@ -310,15 +310,45 @@ def view_planeacion():
                 valid_rows["INICIO"] = pd.to_datetime(valid_rows["INICIO"]).dt.date
                 valid_rows["FINAL APROXIMADO"] = pd.to_datetime(valid_rows["FINAL APROXIMADO"]).dt.date
                 
-                min_date = valid_rows["INICIO"].min()
-                max_date = valid_rows["FINAL APROXIMADO"].max()
+                db_min_date = valid_rows["INICIO"].min()
+                db_max_date = valid_rows["FINAL APROXIMADO"].max()
                 
-                # Generar el rango de fechas
+                # Filtros de fecha interactivos para acotar la visualización del Gantt
+                st.markdown("🔍 **Filtrar diagrama de Gantt por rango de fechas:**")
+                col_f1, col_f2 = st.columns(2)
+                with col_f1:
+                    filter_start = st.date_input(
+                        "📅 Mostrar desde:",
+                        value=db_min_date,
+                        min_value=db_min_date - datetime.timedelta(days=365),
+                        max_value=db_max_date + datetime.timedelta(days=365),
+                        key="gantt_filter_start"
+                    )
+                with col_f2:
+                    filter_end = st.date_input(
+                        "🏁 Mostrar hasta:",
+                        value=db_max_date,
+                        min_value=db_min_date - datetime.timedelta(days=365),
+                        max_value=db_max_date + datetime.timedelta(days=365),
+                        key="gantt_filter_end"
+                    )
+                
+                # Validar rango correcto
+                min_date = filter_start
+                max_date = filter_end
+                if min_date > max_date:
+                    st.error("⚠️ La fecha de inicio debe ser anterior o igual a la fecha de fin. Mostrando rango completo.")
+                    min_date = db_min_date
+                    max_date = db_max_date
+                
+                # Generar el rango de fechas para el calendario horizontal
                 date_range = pd.date_range(start=min_date, end=max_date)
                 
-                # Limitar a máximo 45 días para evitar que la tabla sea demasiado ancha
-                if len(date_range) > 45:
-                    date_range = date_range[:45]
+                # Limitar a máximo 60 días para evitar sobrecargar el navegador
+                if len(date_range) > 60:
+                    st.warning(f"⚠️ El rango seleccionado ({len(date_range)} días) es muy grande. Se limitará a los primeros 60 días.")
+                    date_range = date_range[:60]
+                    max_date = date_range[-1].date()
                     
                 months_es = {1:"ene", 2:"feb", 3:"mar", 4:"abr", 5:"may", 6:"jun", 7:"jul", 8:"ago", 9:"sep", 10:"oct", 11:"nov", 12:"dic"}
                 
@@ -331,15 +361,28 @@ def view_planeacion():
                     date_col_mapping[col_name] = dt.date()
                 
                 # Construir el DataFrame base con las columnas de la izquierda
-                df_gantt_table = df_edited[["ORDENES DE FABRICACION", "INFORMACIÓN DE LA OF", "INICIO", "FINAL APROXIMADO", "AVANCE REAL (CORTE)"]].copy()
+                df_gantt_raw = df_edited[["ORDENES DE FABRICACION", "INFORMACIÓN DE LA OF", "INICIO", "FINAL APROXIMADO", "AVANCE REAL (CORTE)"]].copy()
+                
+                # Convertir a objetos date de forma segura para comparar
+                df_gantt_raw["INICIO_DT"] = pd.to_datetime(df_gantt_raw["INICIO"], errors='coerce').dt.date
+                df_gantt_raw["FINAL_DT"] = pd.to_datetime(df_gantt_raw["FINAL APROXIMADO"], errors='coerce').dt.date
+                
+                # Filtrar filas traslapadas con el rango seleccionado
+                df_gantt_table = df_gantt_raw[
+                    (df_gantt_raw["INICIO_DT"].notna()) &
+                    (df_gantt_raw["FINAL_DT"].notna()) &
+                    (df_gantt_raw["INICIO_DT"] <= max_date) &
+                    (df_gantt_raw["FINAL_DT"] >= min_date)
+                ].copy()
                 
                 # Inicializar las columnas de fecha vacías
                 for col in date_cols:
                     df_gantt_table[col] = ""
                     
                 # Formatear las fechas de la izquierda como strings para visualización
-                df_gantt_table["INICIO"] = df_gantt_table["INICIO"].apply(lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else "")
-                df_gantt_table["FINAL APROXIMADO"] = df_gantt_table["FINAL APROXIMADO"].apply(lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else "")
+                df_gantt_table["INICIO"] = df_gantt_table["INICIO_DT"].apply(lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else "")
+                df_gantt_table["FINAL APROXIMADO"] = df_gantt_table["FINAL_DT"].apply(lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else "")
+                df_gantt_table.drop(columns=["INICIO_DT", "FINAL_DT"], inplace=True)
                 
                 # Definir función de estilizado condicional para las celdas
                 def style_gantt(df_to_style):
@@ -363,7 +406,10 @@ def view_planeacion():
                         row_start = row_orig["INICIO"]
                         row_end = row_orig["FINAL APROXIMADO"]
                         
-                        if pd.notna(row_start) and pd.notna(row_end):
+                        row_start = pd.to_datetime(row_start).date() if pd.notna(row_start) else None
+                        row_end = pd.to_datetime(row_end).date() if pd.notna(row_end) else None
+                        
+                        if row_start and row_end:
                             # Colorear celdas en el rango
                             for col in date_cols:
                                 col_dt = date_col_mapping[col]
@@ -418,27 +464,24 @@ def view_planeacion():
                     mail_subject = st.text_input("Asunto:", value=default_subject, key="gantt_mail_subject")
                     
                     # 1. Obtener rango de fechas para el Gantt en el Correo HTML
-                    valid_rows = df_edited[df_edited["INICIO"].notna() & df_edited["FINAL APROXIMADO"].notna()].copy()
                     date_headers = []
                     date_mappings = []
-                    if not valid_rows.empty:
-                        valid_rows["INICIO"] = pd.to_datetime(valid_rows["INICIO"]).dt.date
-                        valid_rows["FINAL APROXIMADO"] = pd.to_datetime(valid_rows["FINAL APROXIMADO"]).dt.date
+                    
+                    min_date = filter_start
+                    max_date = filter_end
+                    date_range = pd.date_range(start=min_date, end=max_date)
+                    
+                    # Limitar a un rango razonable de 40 días para no sobrecargar el correo
+                    if len(date_range) > 40:
+                        date_range = date_range[:40]
+                        max_date = date_range[-1].date()
                         
-                        min_date = valid_rows["INICIO"].min()
-                        max_date = valid_rows["FINAL APROXIMADO"].max()
-                        date_range = pd.date_range(start=min_date, end=max_date)
-                        
-                        # Limitar a un rango razonable de 40 días para no sobrecargar el correo
-                        if len(date_range) > 40:
-                            date_range = date_range[:40]
-                            
-                        months_es = {1:"ene", 2:"feb", 3:"mar", 4:"abr", 5:"may", 6:"jun", 7:"jul", 8:"ago", 9:"sep", 10:"oct", 11:"nov", 12:"dic"}
-                        
-                        for dt in date_range:
-                            col_name = f"{dt.day}<br><span style='font-size: 8px; text-transform: uppercase;'>{months_es[dt.month]}</span>"
-                            date_headers.append(col_name)
-                            date_mappings.append(dt.date())
+                    months_es = {1:"ene", 2:"feb", 3:"mar", 4:"abr", 5:"may", 6:"jun", 7:"jul", 8:"ago", 9:"sep", 10:"oct", 11:"nov", 12:"dic"}
+                    
+                    for dt in date_range:
+                        col_name = f"{dt.day}<br><span style='font-size: 8px; text-transform: uppercase;'>{months_es[dt.month]}</span>"
+                        date_headers.append(col_name)
+                        date_mappings.append(dt.date())
 
                     # Generar la tabla Gantt en HTML
                     html_table = f"""
@@ -459,11 +502,22 @@ def view_planeacion():
                         </thead>
                         <tbody>
                     """
-                    for idx, row in df_edited.iterrows():
+                    df_email_raw = df_edited[["ORDENES DE FABRICACION", "INFORMACIÓN DE LA OF", "INICIO", "FINAL APROXIMADO"]].copy()
+                    df_email_raw["INICIO_DT"] = pd.to_datetime(df_email_raw["INICIO"], errors='coerce').dt.date
+                    df_email_raw["FINAL_DT"] = pd.to_datetime(df_email_raw["FINAL APROXIMADO"], errors='coerce').dt.date
+                    
+                    df_email_rows = df_email_raw[
+                        (df_email_raw["INICIO_DT"].notna()) &
+                        (df_email_raw["FINAL_DT"].notna()) &
+                        (df_email_raw["INICIO_DT"] <= max_date) &
+                        (df_email_raw["FINAL_DT"] >= min_date)
+                    ].copy()
+                    
+                    for idx, row in df_email_rows.iterrows():
                         of_id = row["ORDENES DE FABRICACION"]
                         of_info = row["INFORMACIÓN DE LA OF"]
-                        inicio_str = row["INICIO"].strftime("%d/%m/%Y") if row["INICIO"] else ""
-                        final_str = row["FINAL APROXIMADO"].strftime("%d/%m/%Y") if row["FINAL APROXIMADO"] else ""
+                        inicio_str = row["INICIO_DT"].strftime("%d/%m/%Y") if row["INICIO_DT"] else ""
+                        final_str = row["FINAL_DT"].strftime("%d/%m/%Y") if row["FINAL_DT"] else ""
                         real_pct = pct_map.get(of_id, 0.0)
                         
                         # Definir badge de color
@@ -486,8 +540,8 @@ def view_planeacion():
                                 <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">{badge}</td>
                         """
                         
-                        row_start = row["INICIO"]
-                        row_end = row["FINAL APROXIMADO"]
+                        row_start = row["INICIO_DT"]
+                        row_end = row["FINAL_DT"]
                         
                         for col_dt in date_mappings:
                             if pd.notna(row_start) and pd.notna(row_end) and row_start <= col_dt <= row_end:
