@@ -509,6 +509,143 @@ def view_mantenimiento():
             st.dataframe(df_cat, use_container_width=True, height=250)
 
     st.markdown("---")
+    st.header("🔧 Cierre Masivo de Nidos — Corte")
+    st.markdown(
+        """
+        Esta sección permite **cerrar masivamente los nidos** que ya fueron cortados físicamente pero que 
+        aparecen como pendientes porque la nueva lógica (hojas completas) detectó que no todas las hojas 
+        fueron registradas hoja por hoja. También verifica que el WIP coincida con lo planeado.
+        """
+    )
+
+    from utils.database import git_sync_db
+    import datetime as _dt
+
+    conn_mant = get_connection()
+
+    # Obtener nidos incompletos
+    df_nidos_incompletos = pd.read_sql_query("""
+        SELECT n.of_number, n.nido, n.hojas as hojas_req,
+               COUNT(DISTINCT a.hoja) as hojas_cortadas,
+               n.hojas - COUNT(DISTINCT a.hoja) as hojas_faltantes
+        FROM nidos n
+        LEFT JOIN avances a ON n.of_number=a.of_number AND n.nido=a.nido AND a.area='Corte'
+        GROUP BY n.of_number, n.nido, n.hojas
+        HAVING hojas_cortadas < n.hojas
+        ORDER BY n.of_number, n.nido
+    """, conn_mant)
+
+    # Obtener resumen de piezas: planeadas vs registradas en avances Corte
+    df_verif = pd.read_sql_query("""
+        SELECT 
+            p.of_number,
+            p.no_pieza,
+            p.nombre_pieza,
+            SUM(p.cantidad * n.hojas) as planeadas,
+            COALESCE(SUM(a.cantidad), 0) as registradas,
+            SUM(p.cantidad * n.hojas) - COALESCE(SUM(a.cantidad), 0) as diferencia
+        FROM piezas p
+        JOIN nidos n ON p.of_number=n.of_number AND p.nido=n.nido
+        LEFT JOIN avances a ON p.of_number=a.of_number AND p.no_pieza=a.no_pieza AND a.area='Corte'
+        GROUP BY p.of_number, p.no_pieza, p.nombre_pieza
+        ORDER BY p.of_number, p.no_pieza
+    """, conn_mant)
+    conn_mant.close()
+
+    # --- Tabla de verificación planeado vs real ---
+    st.markdown("#### 📊 Verificación: Piezas Planeadas vs. Registradas en Corte")
+    if df_verif.empty:
+        st.info("No hay datos de piezas cargadas.")
+    else:
+        total_plan = int(df_verif['planeadas'].sum())
+        total_reg = int(df_verif['registradas'].sum())
+        total_diff = total_plan - total_reg
+        col_v1, col_v2, col_v3 = st.columns(3)
+        col_v1.metric("📦 Total Planeado", f"{total_plan:,} pzs")
+        col_v2.metric("✅ Total Registrado en Corte", f"{total_reg:,} pzs")
+        delta_color = "normal" if total_diff == 0 else "inverse"
+        col_v3.metric("⚠️ Diferencia (Pendiente)", f"{total_diff:,} pzs", delta=f"-{total_diff}" if total_diff > 0 else "0", delta_color=delta_color)
+
+        with st.expander("🔍 Ver detalle por No. Pieza"):
+            df_show = df_verif.copy()
+            df_show.columns = ['OF', 'No. Pieza', 'Descripción', 'Planeadas', 'Registradas', 'Diferencia']
+            df_show['Estado'] = df_show['Diferencia'].apply(lambda x: '✅ OK' if x <= 0 else f'⚠️ Faltan {int(x)}')
+            st.dataframe(df_show, use_container_width=True, hide_index=True, height=300)
+
+    st.markdown("---")
+
+    # --- Cierre masivo ---
+    st.markdown("#### 🔒 Nidos con Hojas Incompletas (Físicamente Ya Cortados)")
+    if df_nidos_incompletos.empty:
+        st.success("✅ ¡Todos los nidos tienen sus hojas completas registradas! No hay pendientes.")
+    else:
+        st.warning(f"⚠️ Se detectaron **{len(df_nidos_incompletos)}** nidos con hojas faltantes en el sistema.")
+
+        df_show_inc = df_nidos_incompletos.copy()
+        df_show_inc.columns = ['OF', 'Nido', 'Hojas Req', 'Hojas Cortadas', 'Faltantes']
+        df_show_inc['Seleccionar'] = True
+        edited_inc = st.data_editor(
+            df_show_inc,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "OF": st.column_config.TextColumn("OF", disabled=True),
+                "Nido": st.column_config.TextColumn("Nido", disabled=True),
+                "Hojas Req": st.column_config.NumberColumn("Hojas Req", disabled=True),
+                "Hojas Cortadas": st.column_config.NumberColumn("Ya Registradas", disabled=True),
+                "Faltantes": st.column_config.NumberColumn("Hojas Faltantes", disabled=True),
+                "Seleccionar": st.column_config.CheckboxColumn("¿Cerrar?", help="Marca para completar las hojas faltantes de este nido")
+            },
+            key="editor_cierre_masivo"
+        )
+
+        nidos_a_cerrar = edited_inc[edited_inc['Seleccionar'] == True]
+        total_hojas_a_reg = int(nidos_a_cerrar['Faltantes'].sum())
+
+        if not nidos_a_cerrar.empty:
+            st.info(f"👉 Se registrarán **{total_hojas_a_reg} hojas** para cerrar **{len(nidos_a_cerrar)} nidos** seleccionados.")
+
+            col_op, col_maq = st.columns(2)
+            with col_op:
+                operador_cierre = st.text_input("Operador (para el registro)", value="ADMINISTRADOR", key="cierre_operador")
+            with col_maq:
+                maquina_cierre = st.text_input("Máquina", value="Láser 1", key="cierre_maquina")
+
+            if st.button("🔒 Completar Hojas Faltantes de los Nidos Seleccionados", type="primary", use_container_width=True):
+                conn_cierre = get_connection()
+                c_cierre = conn_cierre.cursor()
+                now_cierre = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                total_insertados = 0
+
+                for _, row_nido in nidos_a_cerrar.iterrows():
+                    of_n = row_nido['OF']
+                    nido_n = row_nido['Nido']
+                    hojas_ya = int(row_nido['Hojas Cortadas'])
+                    hojas_req = int(row_nido['Hojas Req'])
+
+                    # Obtener piezas del nido
+                    c_cierre.execute(
+                        "SELECT no_pieza, cantidad FROM piezas WHERE of_number=? AND nido=?",
+                        (of_n, nido_n)
+                    )
+                    piezas_nido = c_cierre.fetchall()
+
+                    # Registrar las hojas faltantes
+                    for h in range(hojas_ya + 1, hojas_req + 1):
+                        for no_pieza, cant in piezas_nido:
+                            c_cierre.execute(
+                                "INSERT INTO avances (of_number, nido, no_pieza, area, cantidad, operador, maquina, hoja, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                (of_n, nido_n, no_pieza, "Corte", int(cant), operador_cierre, maquina_cierre, h, now_cierre)
+                            )
+                            total_insertados += 1
+
+                conn_cierre.commit()
+                conn_cierre.close()
+                git_sync_db()
+                st.success(f"🎉 ¡Cierre completado! Se registraron {total_insertados} entradas para cerrar {len(nidos_a_cerrar)} nidos.")
+                st.rerun()
+
+    st.markdown("---")
     st.header("💾 Respaldo y Restauración de la Base de Datos")
     st.markdown(
         """
