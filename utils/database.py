@@ -247,9 +247,25 @@ def init_db_schema(conn=None):
             descripcion_pronest TEXT,
             calibre TEXT,
             prioridad TEXT,
-            proyecto_cliente TEXT
+            proyecto_cliente TEXT,
+            gantt_inicio TEXT,
+            gantt_dias INTEGER DEFAULT 1,
+            gantt_avance TEXT DEFAULT 'PENDIENTE'
         )
     ''')
+    
+    # Migración de columnas de Gantt para bases de datos existentes
+    try:
+        cursor.execute("PRAGMA table_info(ordenes)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "gantt_inicio" not in columns:
+            cursor.execute("ALTER TABLE ordenes ADD COLUMN gantt_inicio TEXT")
+        if "gantt_dias" not in columns:
+            cursor.execute("ALTER TABLE ordenes ADD COLUMN gantt_dias INTEGER DEFAULT 1")
+        if "gantt_avance" not in columns:
+            cursor.execute("ALTER TABLE ordenes ADD COLUMN gantt_avance TEXT DEFAULT 'PENDIENTE'")
+    except Exception as e:
+        print(f"Error migrando tabla ordenes para Gantt: {e}")
     
     # 2. Tabla de Nidos
     cursor.execute('''

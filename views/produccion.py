@@ -105,9 +105,10 @@ def view_planeacion():
     # ══════════════════════════════════════════════════════════
     # SUB SECCIONES (TABS)
     # ══════════════════════════════════════════════════════════
-    tab_carga, tab_rutas = st.tabs([
+    tab_carga, tab_rutas, tab_gantt = st.tabs([
         "📤 3.1 CARGA", 
-        "🛣️ 3.2 SELECCIÓN DE PROCESOS"
+        "🛣️ 3.2 SELECCIÓN DE PROCESOS",
+        "📅 3.3 PROGRAMACIÓN Y GANTT"
     ])
 
     with tab_carga:
@@ -462,6 +463,165 @@ def view_planeacion():
                 st.warning("No se encontraron piezas para esta OF.")
         else:
             st.info("⚠️ Primero debes Cargar y Confirmar un Plan de Producción en la pestaña '3.1 CARGA'.")
+
+    with tab_gantt:
+        st.markdown("### 📅 3.3 Programación y Diagrama de Gantt (Corte Láser)")
+        st.markdown("👇 **Asigna las fechas de inicio, duraciones y estados para cada Orden de Fabricación (OF).**")
+        
+        import datetime
+        from utils.database import get_connection, save_db_to_excel, sync_and_push_db
+        
+        conn = get_connection()
+        # 1. Obtener la cantidad de piezas total por cada OF
+        df_pzs = pd.read_sql_query("""
+            SELECT p.of_number, SUM(p.cantidad * n.hojas) as total_piezas
+            FROM piezas p
+            JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+            GROUP BY p.of_number
+        """, conn)
+        
+        # 2. Obtener los datos de planificación de la tabla ordenes
+        df_ordenes_gantt = pd.read_sql_query("""
+            SELECT of_number, gantt_inicio, gantt_dias, gantt_avance
+            FROM ordenes
+        """, conn)
+        conn.close()
+        
+        if df_ordenes_gantt.empty:
+            st.info("⚠️ No se encontraron Órdenes de Fabricación cargadas en el sistema.")
+        else:
+            df_prog = df_ordenes_gantt.merge(df_pzs, on="of_number", how="left")
+            df_prog["total_piezas"] = df_prog["total_piezas"].fillna(0).astype(int)
+            
+            # Formatear columnas
+            df_prog["INICIO"] = pd.to_datetime(df_prog["gantt_inicio"], errors='coerce').dt.date
+            # Si es nulo, usar la fecha de hoy por defecto
+            df_prog["INICIO"] = df_prog["INICIO"].fillna(datetime.date.today())
+            df_prog["DIAS"] = df_prog["gantt_dias"].fillna(1).astype(int)
+            df_prog["AVANCE"] = df_prog["gantt_avance"].fillna("PENDIENTE").astype(str)
+            
+            # Calcular columna FINAL APROXIMADO
+            def calc_final(row):
+                if pd.isna(row["INICIO"]):
+                    return None
+                return (pd.to_datetime(row["INICIO"]) + pd.to_timedelta(row["DIAS"], unit='D')).date()
+                
+            df_prog["FINAL APROXIMADO"] = df_prog.apply(calc_final, axis=1)
+            
+            df_display = df_prog[["of_number", "total_piezas", "INICIO", "DIAS", "FINAL APROXIMADO", "AVANCE"]].copy()
+            df_display.rename(columns={
+                "of_number": "ORDENES DE FABRICACION",
+                "total_piezas": "CANTIDAD PZS."
+            }, inplace=True)
+            
+            # Configurar columnas del data_editor
+            column_config = {
+                "ORDENES DE FABRICACION": st.column_config.TextColumn("ORDENES DE FABRICACION", disabled=True),
+                "CANTIDAD PZS.": st.column_config.NumberColumn("CANTIDAD PZS.", disabled=True),
+                "INICIO": st.column_config.DateColumn("INICIO", required=True, format="DD/MM/YYYY"),
+                "DIAS": st.column_config.NumberColumn("DIAS", min_value=1, step=1, required=True),
+                "FINAL APROXIMADO": st.column_config.DateColumn("FINAL APROXIMADO", disabled=True, format="DD/MM/YYYY"),
+                "AVANCE": st.column_config.SelectboxColumn(
+                    "AVANCE",
+                    options=["PENDIENTE", "100%", "SE REPROGRAMA FECHA", "PROCESO 1RA. PARTE"],
+                    required=True
+                )
+            }
+            
+            # Mostrar editor de datos
+            df_edited = st.data_editor(
+                df_display,
+                column_config=column_config,
+                hide_index=True,
+                use_container_width=True,
+                key="gantt_scheduler_editor"
+            )
+            
+            # Botón de guardar cambios
+            if st.button("💾 Guardar Plan de Corte", type="primary", key="save_gantt_plan_btn", use_container_width=True):
+                conn = get_connection()
+                c = conn.cursor()
+                for idx, row in df_edited.iterrows():
+                    of_id = row["ORDENES DE FABRICACION"]
+                    inicio_str = row["INICIO"].strftime("%Y-%m-%d") if row["INICIO"] else None
+                    dias_val = int(row["DIAS"])
+                    avance_val = str(row["AVANCE"])
+                    
+                    c.execute("""
+                        UPDATE ordenes 
+                        SET gantt_inicio = ?, gantt_dias = ?, gantt_avance = ?
+                        WHERE of_number = ?
+                    """, (inicio_str, dias_val, avance_val, of_id))
+                conn.commit()
+                conn.close()
+                
+                # Sincronizar Excel y GitHub
+                save_db_to_excel()
+                sync_and_push_db()
+                st.success("✅ ¡Plan de corte guardado y sincronizado con éxito!")
+                st.rerun()
+                
+            # 3. Dibujar el Diagrama de Gantt
+            st.markdown("---")
+            
+            gantt_data = []
+            for idx, row in df_edited.iterrows():
+                if row["INICIO"] and row["DIAS"]:
+                    start_date = pd.to_datetime(row["INICIO"])
+                    finish_date = start_date + pd.to_timedelta(int(row["DIAS"]), unit='D')
+                    
+                    gantt_data.append({
+                        "OF": row["ORDENES DE FABRICACION"],
+                        "Start": start_date,
+                        "Finish": finish_date,
+                        "Avance": row["AVANCE"],
+                        "Dias": f"{int(row['DIAS'])}"
+                    })
+                    
+            if gantt_data:
+                df_gantt = pd.DataFrame(gantt_data)
+                
+                color_map = {
+                    "100%": "#28a745",                 # Verde
+                    "PROCESO 1RA. PARTE": "#ffc107",   # Amarillo
+                    "SE REPROGRAMA FECHA": "#dc3545",  # Rojo
+                    "PENDIENTE": "#6c757d"             # Gris
+                }
+                
+                import plotly.express as px
+                fig = px.timeline(
+                    df_gantt,
+                    x_start="Start",
+                    x_end="Finish",
+                    y="OF",
+                    color="Avance",
+                    text="Dias",
+                    color_discrete_map=color_map,
+                    title="DIAGRAMA DE GANTT CORTE LASER"
+                )
+                
+                fig.update_yaxes(autorange="reversed")  # Invertir eje Y para mantener el orden de la tabla
+                fig.update_layout(
+                    plot_bgcolor="#222222",
+                    paper_bgcolor="#111111",
+                    font_color="white",
+                    title_font_size=18,
+                    title_x=0.5,
+                    margin=dict(l=10, r=10, t=50, b=50),
+                    showlegend=True,
+                    legend_title_text="Estado de Avance"
+                )
+                fig.update_xaxes(
+                    tickformat="%d/%m/%Y",
+                    gridcolor="#333333"
+                )
+                fig.update_traces(
+                    textposition="inside",
+                    insidetextanchor="middle",
+                    textfont=dict(color="black", size=14, family="sans-serif")
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
 
     # Fin de view_planeacion
     pass
