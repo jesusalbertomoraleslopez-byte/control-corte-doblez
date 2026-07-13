@@ -383,7 +383,14 @@ def view_planeacion():
                     with col_m2:
                         mail_cc = st.text_input("CC (Copia):", value=config_correo["cc"], key="gantt_mail_cc")
                         
-                    mail_subject = st.text_input("Asunto:", value="Plan de Producción y Programación de Corte Láser - SIGRAMA", key="gantt_mail_subject")
+                    # Calcular semana y fecha actual para el asunto
+                    import datetime
+                    today = datetime.date.today()
+                    week_num = today.isocalendar()[1]
+                    date_str = today.strftime("%d/%m/%Y")
+                    default_subject = f"Plan de Producción Corte Láser - Sem {week_num} ({date_str}) - SIGRAMA"
+                    
+                    mail_subject = st.text_input("Asunto:", value=default_subject, key="gantt_mail_subject")
                     
                     # Generar la tabla HTML
                     html_table = """
