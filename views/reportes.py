@@ -6,7 +6,7 @@ from views.avances import PROCESSES
 
 def get_area_anterior(ruta_str, current_area):
     if pd.isna(ruta_str): return None
-    procesos = [p.strip() for p in str(ruta_str).split(',') if p.strip() and p.strip() != 'Pintura']
+    procesos = [p.strip() for p in str(ruta_str).split(',') if p.strip()]
     if current_area in procesos:
         idx = procesos.index(current_area)
         if idx > 0:
@@ -78,7 +78,7 @@ def calculate_global_wip(of_number):
             
         # Post corte
         df_piezas = df_todas.copy()
-        df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in [p.strip() for p in str(x).split(',') if p.strip() and p.strip() != 'Pintura'])
+        df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in [p.strip() for p in str(x).split(',') if p.strip()])
         df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
         
         if df_piezas.empty:
@@ -199,7 +199,7 @@ def get_wip_pieces_detail(of_list, area):
                     details.append(df_g)
         else:
             df_piezas = df_todas.copy()
-            df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in [p.strip() for p in str(x).split(',') if p.strip() and p.strip() != 'Pintura'])
+            df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in [p.strip() for p in str(x).split(',') if p.strip()])
             df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
             
             if df_piezas.empty:
@@ -299,7 +299,7 @@ def calculate_wip_on_date(of_list, target_date_str):
                 total_wip_area += int(df_corte_pend['total_requeridas'].sum())
             else:
                 df_piezas = df_todas.copy()
-                df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in [p.strip() for p in str(x).split(',') if p.strip() and p.strip() != 'Pintura'])
+                df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in [p.strip() for p in str(x).split(',') if p.strip()])
                 df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
                 
                 if df_piezas.empty:

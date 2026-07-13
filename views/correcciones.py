@@ -190,7 +190,7 @@ def view_correcciones():
                 )
                 res = cur.fetchone()
                 if res and res[0]:
-                    procesos = [p.strip() for p in res[0].split(",") if p.strip() and p.strip() != 'Pintura']
+                    procesos = [p.strip() for p in res[0].split(",") if p.strip()]
                     if sel_area in procesos:
                         idx_a = procesos.index(sel_area)
                         area_ant = procesos[idx_a - 1] if idx_a > 0 else "Planeación"
