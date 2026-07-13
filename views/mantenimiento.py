@@ -739,6 +739,10 @@ def view_mantenimiento_admin():
             try:
                 from utils.database import EXCEL_DB_PATH, save_db_to_excel
                 save_db_to_excel()
+                # Configurar identidad de git (requerido en contenedores sin config global)
+                subprocess.run(["git", "config", "user.email", "bot@sigrama.com"], capture_output=True)
+                subprocess.run(["git", "config", "user.name", "Sigrama Bot"], capture_output=True)
+                
                 subprocess.run(["git", "add", EXCEL_DB_PATH], capture_output=True, timeout=15)
                 res_commit = subprocess.run(
                     ["git", "commit", "-m", f"Manual-sync DB Excel {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],

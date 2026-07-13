@@ -24,15 +24,20 @@ def git_sync_db():
                 except Exception:
                     pass
                 
+                # Configurar identidad de git (requerido en contenedores sin config global)
+                subprocess.run(["git", "config", "user.email", "bot@sigrama.com"], capture_output=True)
+                subprocess.run(["git", "config", "user.name", "Sigrama Bot"], capture_output=True)
+                
                 subprocess.run(["git", "add", EXCEL_DB_PATH], capture_output=True, timeout=15)
                 result = subprocess.run(
                     ["git", "commit", "-m", f"Auto-sync DB Excel {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
                     capture_output=True, timeout=15
                 )
-                subprocess.run(
-                    ["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "push", "origin", "main"],
-                    capture_output=True, timeout=30
-                )
+                if result.returncode == 0:
+                    subprocess.run(
+                        ["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "push", "origin", "main"],
+                        capture_output=True, timeout=30
+                    )
         except Exception:
             pass  # Silencioso: no romper la app si git falla
     threading.Thread(target=_sync, daemon=True).start()

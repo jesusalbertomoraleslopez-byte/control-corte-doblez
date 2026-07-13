@@ -203,8 +203,12 @@ def render_sidebar():
                     from utils.database import EXCEL_DB_PATH, save_db_to_excel
                     save_db_to_excel()
                     
+                    # Configurar identidad de git (requerido en contenedores sin config global)
+                    subprocess.run(["git", "config", "user.email", "bot@sigrama.com"], capture_output=True)
+                    subprocess.run(["git", "config", "user.name", "Sigrama Bot"], capture_output=True)
+                    
                     subprocess.run(["git", "add", EXCEL_DB_PATH], capture_output=True, timeout=15)
-                    subprocess.run(
+                    res_commit = subprocess.run(
                         ["git", "commit", "-m", f"Manual-sync sidebar {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
                         capture_output=True, timeout=15
                     )
@@ -223,8 +227,12 @@ def render_sidebar():
                     )
                     
                     if res_push.returncode == 0:
-                        st.toast("✅ ¡Sincronizado con éxito!", icon="🚀")
-                        st.balloons()
+                        commit_msg = res_commit.stdout.decode('utf-8', errors='ignore').strip()
+                        if "nothing to commit" in res_commit.stdout.decode('utf-8', errors='ignore') or res_commit.returncode != 0:
+                            st.toast("⚠️ Sin cambios nuevos que sincronizar", icon="ℹ️")
+                        else:
+                            st.toast("✅ ¡Sincronizado con éxito!", icon="🚀")
+                            st.balloons()
                     else:
                         err_text = res_push.stderr.decode('utf-8', errors='ignore')
                         st.toast(f"❌ Error al subir: {err_text[:100]}", icon="⚠️")
