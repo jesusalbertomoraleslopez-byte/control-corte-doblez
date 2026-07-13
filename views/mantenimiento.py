@@ -311,6 +311,8 @@ def view_mantenimiento_admin():
                         c.execute("UPDATE rechazos SET timestamp = ? WHERE id = ?", (new_ts, rec_id))
                         
                     conn.commit()
+                    from utils.database import git_sync_db
+                    git_sync_db()
                     st.success(f"✅ ¡Fechas redistribuidas con éxito para {len(av_rows)} avances y {len(rec_rows)} rechazos!")
                     st.rerun()
                 except Exception as e:
