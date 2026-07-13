@@ -739,8 +739,28 @@ def view_mantenimiento_admin():
         """
     )
     
-    col_git_title, col_git_btn = st.columns([3, 1])
-    with col_git_btn:
+    col_git_title, col_git_btn1, col_git_btn2 = st.columns([2, 1, 1])
+    with col_git_btn1:
+        if st.button("🔄 Sincronizar con GitHub", key="sync_git_manually", use_container_width=True, type="primary"):
+            import datetime
+            try:
+                subprocess.run(["git", "add", "sigrama.db"], capture_output=True, timeout=15)
+                res_commit = subprocess.run(
+                    ["git", "commit", "-m", f"Manual-sync DB {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
+                    capture_output=True, timeout=15
+                )
+                res_push = subprocess.run(["git", "push", "origin", "main"], capture_output=True, timeout=30)
+                if res_push.returncode == 0:
+                    st.success("✅ ¡Sincronizado con éxito en GitHub!")
+                    st.rerun()
+                elif res_commit.returncode != 0:
+                    st.info("ℹ️ No hay cambios nuevos en la base de datos para sincronizar.")
+                else:
+                    st.error(f"❌ Error al subir a GitHub: {res_push.stderr.decode('utf-8', errors='ignore')}")
+            except Exception as e:
+                st.error(f"Error de sistema al sincronizar: {e}")
+                
+    with col_git_btn2:
         if st.button("🔄 Actualizar Historial", key="refresh_git_commits", use_container_width=True):
             st.rerun()
             
