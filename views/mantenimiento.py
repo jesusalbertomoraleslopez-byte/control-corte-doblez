@@ -747,9 +747,8 @@ def view_mantenimiento_admin():
                 res_push = subprocess.run(["git", "push", "origin", "main"], capture_output=True, timeout=30)
                 if res_push.returncode == 0:
                     st.success("✅ ¡Sincronizado con éxito en GitHub!")
+                    st.balloons()
                     st.rerun()
-                elif res_commit.returncode != 0:
-                    st.info("ℹ️ No hay cambios nuevos en la base de datos para sincronizar.")
                 else:
                     st.error(f"❌ Error al subir a GitHub: {res_push.stderr.decode('utf-8', errors='ignore')}")
             except Exception as e:

@@ -204,7 +204,7 @@ def render_sidebar():
                     save_db_to_excel()
                     
                     subprocess.run(["git", "add", EXCEL_DB_PATH], capture_output=True, timeout=15)
-                    res_commit = subprocess.run(
+                    subprocess.run(
                         ["git", "commit", "-m", f"Manual-sync sidebar {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
                         capture_output=True, timeout=15
                     )
@@ -213,10 +213,9 @@ def render_sidebar():
                     if res_push.returncode == 0:
                         st.toast("✅ ¡Sincronizado con éxito!", icon="🚀")
                         st.balloons()
-                    elif res_commit.returncode != 0:
-                        st.toast("ℹ️ No hay cambios para subir.", icon="ℹ️")
                     else:
-                        st.toast("❌ Error en conexión con GitHub.", icon="⚠️")
+                        err_text = res_push.stderr.decode('utf-8', errors='ignore')
+                        st.toast(f"❌ Error al subir: {err_text[:100]}", icon="⚠️")
                 except Exception as e:
                     st.toast(f"❌ Error: {e}", icon="🚨")
                     
