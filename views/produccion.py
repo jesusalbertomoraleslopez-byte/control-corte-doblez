@@ -392,47 +392,82 @@ def view_planeacion():
                     
                     mail_subject = st.text_input("Asunto:", value=default_subject, key="gantt_mail_subject")
                     
-                    # Generar la tabla HTML
-                    html_table = """
-                    <table style="border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 14px; margin-top: 15px;">
+                    # 1. Obtener rango de fechas para el Gantt en el Correo HTML
+                    valid_rows = df_edited[df_edited["INICIO"].notna() & df_edited["FINAL APROXIMADO"].notna()].copy()
+                    date_headers = []
+                    date_mappings = []
+                    if not valid_rows.empty:
+                        valid_rows["INICIO"] = pd.to_datetime(valid_rows["INICIO"]).dt.date
+                        valid_rows["FINAL APROXIMADO"] = pd.to_datetime(valid_rows["FINAL APROXIMADO"]).dt.date
+                        
+                        min_date = valid_rows["INICIO"].min()
+                        max_date = valid_rows["FINAL APROXIMADO"].max()
+                        date_range = pd.date_range(start=min_date, end=max_date)
+                        
+                        # Limitar a un rango razonable de 40 días para no sobrecargar el correo
+                        if len(date_range) > 40:
+                            date_range = date_range[:40]
+                            
+                        months_es = {1:"ene", 2:"feb", 3:"mar", 4:"abr", 5:"may", 6:"jun", 7:"jul", 8:"ago", 9:"sep", 10:"oct", 11:"nov", 12:"dic"}
+                        
+                        for dt in date_range:
+                            col_name = f"{dt.day}<br><span style='font-size: 8px; text-transform: uppercase;'>{months_es[dt.month]}</span>"
+                            date_headers.append(col_name)
+                            date_mappings.append(dt.date())
+
+                    # Generar la tabla Gantt en HTML
+                    html_table = f"""
+                    <table style="border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 11px; margin-top: 15px; border: 1px solid #ddd; table-layout: fixed;">
                         <thead>
                             <tr style="background-color: #EC2024; color: white;">
-                                <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">OF</th>
-                                <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Cantidad Pzs.</th>
-                                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Inicio</th>
-                                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Días</th>
-                                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Fin Aproximado</th>
-                                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Avance Físico</th>
-                                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Estado Manual</th>
+                                <th style="padding: 8px; border: 1px solid #ddd; text-align: left; width: 120px;">OF</th>
+                                <th style="padding: 8px; border: 1px solid #ddd; text-align: center; width: 65px;">Inicio</th>
+                                <th style="padding: 8px; border: 1px solid #ddd; text-align: center; width: 65px;">Final</th>
+                                <th style="padding: 8px; border: 1px solid #ddd; text-align: center; width: 55px;">Avance</th>
+                    """
+                    for header in date_headers:
+                        html_table += f'<th style="padding: 4px 2px; border: 1px solid #ddd; text-align: center; font-size: 9px; line-height: 1.1; width: 28px; font-weight: bold;">{header}</th>'
+                        
+                    html_table += """
                             </tr>
                         </thead>
                         <tbody>
                     """
                     for idx, row in df_edited.iterrows():
+                        of_id = row["ORDENES DE FABRICACION"]
                         inicio_str = row["INICIO"].strftime("%d/%m/%Y") if row["INICIO"] else ""
                         final_str = row["FINAL APROXIMADO"].strftime("%d/%m/%Y") if row["FINAL APROXIMADO"] else ""
-                        of_id = row["ORDENES DE FABRICACION"]
                         real_pct = pct_map.get(of_id, 0.0)
                         
                         # Definir badge de color
                         if real_pct >= 100.0:
-                            badge = '<span style="color: #28a745; font-weight: bold;">🟢 100% (Completado)</span>'
+                            color_hex = "#28a745"
+                            badge = f'<span style="color: {color_hex}; font-weight: bold;">🟢 100%</span>'
                         elif real_pct > 0.0:
-                            badge = f'<span style="color: #ffc107; font-weight: bold;">🟡 {real_pct:.1f}% (En proceso)</span>'
+                            color_hex = "#ffc107"
+                            badge = f'<span style="color: #d39e00; font-weight: bold;">🟡 {real_pct:.0f}%</span>'
                         else:
-                            badge = '<span style="color: #6c757d; font-weight: bold;">⚪ 0% (Pendiente)</span>'
+                            color_hex = "#a0aab2"
+                            badge = f'<span style="color: #6c757d; font-weight: bold;">⚪ 0%</span>'
                             
                         html_table += f"""
                             <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{of_id}</td>
-                                <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">{row["CANTIDAD PZS."]}</td>
-                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{inicio_str}</td>
-                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{row["DIAS"]}</td>
-                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{final_str}</td>
-                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{badge}</td>
-                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{row["AVANCE"]}</td>
-                            </tr>
+                                <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{of_id}</td>
+                                <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">{inicio_str}</td>
+                                <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">{final_str}</td>
+                                <td style="padding: 6px; border: 1px solid #ddd; text-align: center;">{badge}</td>
                         """
+                        
+                        row_start = row["INICIO"]
+                        row_end = row["FINAL APROXIMADO"]
+                        
+                        for col_dt in date_mappings:
+                            if pd.notna(row_start) and pd.notna(row_end) and row_start <= col_dt <= row_end:
+                                html_table += f'<td style="border: 1px solid #ddd; background-color: {color_hex}; width: 28px;"></td>'
+                            else:
+                                html_table += '<td style="border: 1px solid #ddd; background-color: #ffffff; width: 28px;"></td>'
+                                
+                        html_table += "</tr>"
                     html_table += "</tbody></table>"
                     
                     # Cuerpo HTML completo
@@ -450,14 +485,14 @@ def view_planeacion():
                             <div style="padding: 25px;">
                                 <p>Estimado equipo,</p>
                                 <p>Compartimos el plan de producción y la programación de fechas estimada para los trabajos en la estación de <strong>Corte Láser</strong>.</p>
-                                <p>A continuación se presenta el resumen de los estatus y avances físicos actuales:</p>
+                                <p>A continuación se presenta el resumen de la programación y los avances físicos en formato de diagrama de Gantt:</p>
                                 
-                                <div style="margin: 20px 0;">
+                                <div style="margin: 20px 0; overflow-x: auto;">
                                     {html_table}
                                 </div>
                                 
                                 <p style="font-size: 13px; color: #666; background-color: #f8f9fa; padding: 15px; border-left: 4px solid #EC2024; border-radius: 4px; margin-top: 25px;">
-                                    <strong>Nota:</strong> Adjunto a este correo encontrará el archivo de la base de datos de producción <code>sigrama_database.xlsx</code> con el desglose detallado de nidos, piezas y rutas de fabricación correspondientes.
+                                    <strong>Nota:</strong> Adjunto a este correo encontrará el archivo Excel <code>Reporte_Detallado_WIP.xlsx</code> con el desglose detallado de piezas en WIP (Trabajo En Proceso) agrupadas por área de producción.
                                 </p>
                                 
                                 <p style="margin-top: 30px;">Atentamente,<br><strong>Supervisor de Corte Láser</strong><br>Industria Sigrama</p>
@@ -485,16 +520,18 @@ def view_planeacion():
                     body_part = MIMEText(html_body, 'html', 'utf-8')
                     msg.attach(body_part)
                     
-                    excel_db_filename = "sigrama_database.xlsx"
-                    if os.path.exists(excel_db_filename):
-                        with open(excel_db_filename, 'rb') as f:
-                            excel_data = f.read()
+                    # Generar y adjuntar el reporte de WIP consolidado en Excel
+                    try:
+                        of_list_wip = list(df_edited["ORDENES DE FABRICACION"].unique())
+                        wip_excel_data = generate_wip_excel(of_list_wip)
                         
                         part = MIMEBase('application', 'octet-stream')
-                        part.set_payload(excel_data)
+                        part.set_payload(wip_excel_data)
                         encoders.encode_base64(part)
-                        part.add_header('Content-Disposition', 'attachment; filename="Plan_Produccion_SIGRAMA.xlsx"')
+                        part.add_header('Content-Disposition', 'attachment; filename="Reporte_Detallado_WIP.xlsx"')
                         msg.attach(part)
+                    except Exception as e_wip:
+                        st.error(f"Error al generar reporte Excel de WIP: {e_wip}")
                         
                     eml_bytes = msg.as_bytes()
                     
@@ -876,3 +913,100 @@ def view_produccion():
         view_avances()
     else:
         st.info("⚠️ Primero debes Cargar y Confirmar un Plan de Producción en el menú de 'Planeación'.")
+
+def generate_wip_excel(ofs):
+    import io
+    import pandas as pd
+    from utils.database import get_connection
+    from views.reportes import get_wip_pieces_detail, style_excel_sheet
+    
+    conn = get_connection()
+    df_meta = pd.read_sql_query("SELECT * FROM ordenes", conn)
+    conn.close()
+    
+    relevant_procs = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+    excel_sheet_names = {
+        "Corte": "x-Cortar",
+        "Rebabeo": "x-Rebabear",
+        "Doblez": "x-Doblar",
+        "Barrenado": "x-Barrenar",
+        "Pintura": "x-Pintar",
+        "Liberado": "x-Liberar",
+        "Empaque": "x-Empacar"
+    }
+    
+    consolidado_rows = []
+    detailed_dfs = {}
+    summary_rows = []
+    
+    for area in relevant_procs:
+        df_area = get_wip_pieces_detail(ofs, area)
+        
+        if not df_area.empty:
+            df_area = df_area.merge(df_meta, left_on='OF', right_on='of_number', how='left')
+            if 'of_number' in df_area.columns:
+                df_area.drop(columns=['of_number'], inplace=True)
+            rename_map = {
+                'proyecto': 'Proyecto',
+                'programador': 'Programador',
+                'fecha': 'Fecha Producción',
+                'po': 'PO',
+                'prioridad': 'Prioridad',
+                'calibre': 'Calibre OF',
+                'proyecto_cliente': 'Proyecto Cliente',
+                'descripcion_pronest': 'Descripción Pronest',
+                'fecha_carga': 'Fecha Carga'
+            }
+            df_area.rename(columns=rename_map, inplace=True)
+            
+            df_area.rename(columns={
+                'no_pieza': 'No. Parte',
+                'nombre_pieza': 'Descripción',
+                'cantidad_wip': 'Cantidad WIP',
+                'pendiente_disp': 'Cantidad WIP'
+            }, inplace=True)
+            
+            cols_first = ['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'Fecha Producción']
+            cols_other = [c for c in df_area.columns if c not in cols_first]
+            cols_first = [c for c in cols_first if c in df_area.columns]
+            df_area = df_area[cols_first + cols_other]
+            
+            detailed_dfs[area] = df_area
+            
+            df_c = df_area.copy()
+            df_c.insert(0, 'Área / Proceso', excel_sheet_names.get(area, area))
+            consolidado_rows.append(df_c)
+            
+            wip_sum = df_area['Cantidad WIP'].sum()
+            summary_rows.append({
+                "Área / Proceso": excel_sheet_names.get(area, area),
+                "Total Piezas en WIP": int(wip_sum)
+            })
+        else:
+            summary_rows.append({
+                "Área / Proceso": excel_sheet_names.get(area, area),
+                "Total Piezas en WIP": 0
+            })
+            
+    df_resumen_wip = pd.DataFrame(summary_rows)
+    
+    if consolidado_rows:
+        df_consolidado = pd.concat(consolidado_rows, ignore_index=True)
+    else:
+        df_consolidado = pd.DataFrame(columns=['Área / Proceso', 'OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'No. Parte', 'Descripción', 'Cantidad WIP'])
+        
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_resumen_wip.to_excel(writer, sheet_name='Resumen por Área', index=False)
+        style_excel_sheet(writer, df_resumen_wip, 'Resumen por Área')
+        
+        df_consolidado.to_excel(writer, sheet_name='Consolidado', index=False)
+        style_excel_sheet(writer, df_consolidado, 'Consolidado')
+        
+        for area in relevant_procs:
+            df_area = detailed_dfs.get(area, pd.DataFrame(columns=['OF', 'Proyecto', 'Proyecto Cliente', 'PO', 'Prioridad', 'Calibre OF', 'No. Parte', 'Descripción', 'Cantidad WIP']))
+            sheet_title = excel_sheet_names.get(area, area)[:31]
+            df_area.to_excel(writer, sheet_name=sheet_title, index=False)
+            style_excel_sheet(writer, df_area, sheet_title)
+            
+    return output.getvalue()
