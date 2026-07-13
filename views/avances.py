@@ -305,18 +305,19 @@ def view_avances():
         df_edit = df_edit.merge(df_sum_req, on=['of_number', 'no_pieza'], how='left')
         df_edit['total_req'] = df_edit['total_req'].fillna(0).astype(int)
         
-        # Calcular WIP de Ingeniería
+        # Calcular WIP de Ingeniería: contar partes únicas pendientes de diseñar
         df_pendientes = df_edit[df_edit['Diseñada'] == False].copy()
-        total_wip_ingenieria = df_pendientes['total_req'].sum()
+        total_wip_ingenieria = len(df_pendientes)   # Número de partes únicas, no piezas físicas
+        total_partes = len(df_edit)
         
         # Mostrar tarjeta WIP
         st.markdown(
             f"""
             <div style="background-color: #f8f9fa; border-left: 8px solid #EC2024; padding: 25px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                <h3 style="margin: 0; color: #555; font-size: 1.4rem; text-transform: uppercase;">Sumatoria WIP - Ingeniería (Pendiente de Diseñar)</h3>
+                <h3 style="margin: 0; color: #555; font-size: 1.4rem; text-transform: uppercase;">WIP Ingeniería — Números de Parte por Diseñar</h3>
                 <div style="display: flex; align-items: baseline; gap: 10px;">
-                    <h1 style="margin: 0; color: #EC2024; font-size: 4.5rem; font-weight: 900; line-height: 1;">{int(total_wip_ingenieria)}</h1>
-                    <span style="font-size: 1.8rem; font-weight: bold; color: #666;">piezas pendientes de diseñar</span>
+                    <h1 style="margin: 0; color: #EC2024; font-size: 4.5rem; font-weight: 900; line-height: 1;">{total_wip_ingenieria}</h1>
+                    <span style="font-size: 1.8rem; font-weight: bold; color: #666;">/ {total_partes} partes pendientes de diseñar</span>
                 </div>
             </div>
             """, unsafe_allow_html=True
