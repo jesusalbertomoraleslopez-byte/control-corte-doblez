@@ -208,7 +208,19 @@ def render_sidebar():
                         ["git", "commit", "-m", f"Manual-sync sidebar {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
                         capture_output=True, timeout=15
                     )
-                    res_push = subprocess.run(["git", "push", "origin", "main"], capture_output=True, timeout=30)
+                    # Intentar usar token de secrets para cambiar a HTTPS si está configurado
+                    try:
+                        token = st.secrets.get("GITHUB_TOKEN")
+                        if token:
+                            url = f"https://{token}@github.com/jesusalbertomoraleslopez-byte/control-corte-doblez.git"
+                            subprocess.run(["git", "remote", "set-url", "origin", url], capture_output=True)
+                    except Exception:
+                        pass
+
+                    res_push = subprocess.run(
+                        ["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "push", "origin", "main"],
+                        capture_output=True, timeout=30
+                    )
                     
                     if res_push.returncode == 0:
                         st.toast("✅ ¡Sincronizado con éxito!", icon="🚀")

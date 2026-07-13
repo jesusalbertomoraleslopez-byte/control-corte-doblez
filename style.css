@@ -22,8 +22,25 @@ h1, h2, h3, h4, h5, h6 {
     background-color: #111111 !important;
 }
 
-[data-testid="stSidebar"] * {
+[data-testid="stSidebar"] p, 
+[data-testid="stSidebar"] span, 
+[data-testid="stSidebar"] label, 
+[data-testid="stSidebar"] h1, 
+[data-testid="stSidebar"] h2, 
+[data-testid="stSidebar"] h3, 
+[data-testid="stSidebar"] h4, 
+[data-testid="stSidebar"] h5, 
+[data-testid="stSidebar"] h6,
+[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] {
     color: #FFFFFF !important;
+}
+
+/* Ensure selectbox and text input fields inside the sidebar are readable */
+[data-testid="stSidebar"] div[data-baseweb="select"] *,
+[data-testid="stSidebar"] input,
+[data-testid="stSidebar"] select,
+[data-testid="stSidebar"] textarea {
+    color: #111111 !important;
 }
 
 /* Buttons */
