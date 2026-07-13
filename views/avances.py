@@ -58,7 +58,14 @@ def view_avances():
         
         todas_ofs = df_ofs_f["of_number"].tolist()
         todas_ofs_opciones = ["Todas"] + todas_ofs
-        of_seleccionada = st.selectbox("2️⃣ Orden de Fabricación (OF)", todas_ofs_opciones, key="avance_of_selector")
+        
+        # Sincronizar el selector local con la OF seleccionada en la barra lateral
+        default_idx = 0
+        global_active_of = st.session_state.get("of_number")
+        if global_active_of in todas_ofs_opciones:
+            default_idx = todas_ofs_opciones.index(global_active_of)
+            
+        of_seleccionada = st.selectbox("2️⃣ Orden de Fabricación (OF)", todas_ofs_opciones, index=default_idx, key="avance_of_selector")
         of_number = of_seleccionada
 
     # Fila 2 de Filtros (3 columnas)
