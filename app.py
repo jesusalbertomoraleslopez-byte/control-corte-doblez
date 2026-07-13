@@ -179,13 +179,13 @@ def render_sidebar():
     <div style="background-color: #1a1a1a; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #EC2024; font-family: 'Questrial', sans-serif;">
         <p style="margin: 0; font-size: 0.82rem; color: #aaa; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">🏭 WIP EN PISO (TOTAL)</p>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.75rem; color: #fff; margin-top: 8px;">
-            <div><b>Corte:</b> {wip_corte:,}</div>
-            <div><b>Rebabeo:</b> {wip_rebabeo:,}</div>
-            <div><b>Doblez:</b> {wip_doblez:,}</div>
-            <div><b>Barrenado:</b> {wip_barrenado:,}</div>
-            <div><b>Pintura:</b> {wip_pintura:,}</div>
-            <div><b>Liberado:</b> {wip_liberado:,}</div>
-            <div style="grid-column: span 2;"><b>Empaque:</b> {wip_empaque:,}</div>
+            <div><b>Por Cortar:</b> {wip_corte:,}</div>
+            <div><b>Por Rebabear:</b> {wip_rebabeo:,}</div>
+            <div><b>Por Doblar:</b> {wip_doblez:,}</div>
+            <div><b>Por Barrenar:</b> {wip_barrenado:,}</div>
+            <div><b>Por Pintar:</b> {wip_pintura:,}</div>
+            <div><b>Por Liberar:</b> {wip_liberado:,}</div>
+            <div style="grid-column: span 2;"><b>Por Empacar:</b> {wip_empaque:,}</div>
         </div>
     </div>
     """
