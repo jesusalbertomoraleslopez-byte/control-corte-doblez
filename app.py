@@ -114,30 +114,16 @@ def render_sidebar():
         
     choice = st.sidebar.radio("Navegación", menu)
     
-    st.sidebar.markdown("---")
-    
-    # Selector Global de OF Activa
+    # Determinar la OF Activa en segundo plano
     from utils.database import get_all_ofs, get_active_of
     all_ofs = get_all_ofs()
     if all_ofs:
         current_active = st.session_state.get("of_number")
-        if not current_active:
+        if not current_active or current_active not in all_ofs:
             db_active = get_active_of()
             current_active = db_active['of_number'] if db_active else all_ofs[0]
-            
-        default_idx = 0
-        if current_active in all_ofs:
-            default_idx = all_ofs.index(current_active)
-            
-        selected_of = st.sidebar.selectbox(
-            "🔍 Orden Activa (OF):",
-            all_ofs,
-            index=default_idx,
-            key="sidebar_of_selector"
-        )
-        st.session_state.of_number = selected_of
+        st.session_state.of_number = current_active
     else:
-        st.sidebar.info("ℹ️ No hay OFs cargadas.")
         st.session_state.of_number = None
         
     st.sidebar.markdown("---")

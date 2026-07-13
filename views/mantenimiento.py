@@ -724,6 +724,27 @@ def view_mantenimiento_admin():
                     st.error(f"Error al restaurar base de datos: {e}")
 
     st.markdown("---")
+    st.header("✉️ Configuración de Destinatarios de Correo (Reportes)")
+    st.markdown("👇 **Configura las direcciones de correo electrónico que se utilizarán por defecto al generar borradores de reportes (.eml).**")
+    
+    from utils.database import get_config_correo, save_config_correo
+    
+    # 1. Cargar configuración actual para plan de producción
+    config_plan = get_config_correo("plan_produccion", "produccion@sigrama.com", "corte.laser@sigrama.com")
+    
+    with st.form("form_config_correos"):
+        st.markdown("##### 📅 Reporte de Plan de Producción / Corte Láser")
+        c_para = st.text_input("Para (Destinatarios principales - Separados por coma):", value=config_plan["para"])
+        c_cc = st.text_input("CC (Copia - Separados por coma):", value=config_plan["cc"])
+        
+        btn_save_config = st.form_submit_button("💾 Guardar Configuración de Correos")
+        
+        if btn_save_config:
+            save_config_correo("plan_produccion", c_para.strip(), c_cc.strip())
+            st.success("✅ ¡Configuración de correos guardada y sincronizada exitosamente!")
+            st.rerun()
+
+    st.markdown("---")
     st.header("📊 Historial de Respaldos y Cambios (GitHub)")
     st.markdown(
         """

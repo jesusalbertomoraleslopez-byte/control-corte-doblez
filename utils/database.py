@@ -45,7 +45,8 @@ def sync_and_push_db():
         "piezas": ["of_number", "nido", "no_pieza"],
         "avances": ["of_number", "nido", "no_pieza", "area", "operador", "maquina", "hoja", "timestamp"],
         "rechazos": ["of_number", "nido", "no_pieza", "area", "operador", "maquina", "hoja", "timestamp", "motivo"],
-        "personal_areas": ["operador_nombre", "area"]
+        "personal_areas": ["operador_nombre", "area"],
+        "config_correos": ["clave"]
     }
 
     if has_remote:
@@ -137,7 +138,7 @@ def save_db_to_excel(conn=None):
         conn = sqlite3.connect(TEMP_DB_PATH)
         close_at_end = True
         
-    tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas"]
+    tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos"]
     temp_excel = "sigrama_database_temp.xlsx"
     try:
         with pd.ExcelWriter(temp_excel, engine='openpyxl') as writer:
@@ -194,7 +195,7 @@ def sync_excel_to_sqlite():
         excel_file = pd.ExcelFile(EXCEL_DB_PATH)
         sheets = excel_file.sheet_names
         
-        tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas"]
+        tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos"]
         for t in tables:
             best_match = next((s for s in sheets if s.lower() == t.lower()), None)
             if best_match:
@@ -334,6 +335,15 @@ def init_db_schema(conn=None):
             operador_nombre TEXT NOT NULL,
             area TEXT NOT NULL,
             PRIMARY KEY (operador_nombre, area)
+        )
+    ''')
+    
+    # 7. Tabla de Configuración de Correos
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS config_correos (
+            clave TEXT PRIMARY KEY,
+            para TEXT,
+            cc TEXT
         )
     ''')
     
@@ -849,3 +859,33 @@ def get_operadores_por_area(area):
             ops = df_pers['nombre'].astype(str).str.strip().str.upper().dropna().unique().tolist()
             ops.sort()
     return ops
+
+def get_config_correo(clave, default_para="", default_cc=""):
+    """Consulta la configuración de correos para una clave de reporte."""
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        # Asegurar de que la tabla existe por si acaso
+        c.execute("CREATE TABLE IF NOT EXISTS config_correos (clave TEXT PRIMARY KEY, para TEXT, cc TEXT)")
+        c.execute("SELECT para, cc FROM config_correos WHERE clave = ?", (clave,))
+        row = c.fetchone()
+    except Exception:
+        row = None
+    conn.close()
+    if row:
+        return {"para": row[0] or "", "cc": row[1] or ""}
+    return {"para": default_para, "cc": default_cc}
+
+def save_config_correo(clave, para, cc):
+    """Guarda o actualiza la configuración de correos para una clave de reporte."""
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute("CREATE TABLE IF NOT EXISTS config_correos (clave TEXT PRIMARY KEY, para TEXT, cc TEXT)")
+        c.execute("INSERT OR REPLACE INTO config_correos (clave, para, cc) VALUES (?, ?, ?)", (clave, para, cc))
+        conn.commit()
+    except Exception as e:
+        print(f"Error al guardar config de correo: {e}")
+    save_db_to_excel(conn)
+    conn.close()
+    git_sync_db()

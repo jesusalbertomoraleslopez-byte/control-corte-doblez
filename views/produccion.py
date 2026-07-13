@@ -373,11 +373,15 @@ def view_planeacion():
                 with st.expander("✉️ Compartir Plan de Corte por Correo (Outlook/Borrador)"):
                     st.markdown("👇 **Descarga un archivo `.eml` (Borrador de Correo) con el plan de producción formateado en HTML y la base de datos Excel adjunta.**")
                     
+                    # Consultar configuración persistente de correos
+                    from utils.database import get_config_correo
+                    config_correo = get_config_correo("plan_produccion", "produccion@sigrama.com", "corte.laser@sigrama.com")
+                    
                     col_m1, col_m2 = st.columns(2)
                     with col_m1:
-                        mail_to = st.text_input("Para:", value="produccion@sigrama.com", key="gantt_mail_to")
+                        mail_to = st.text_input("Para:", value=config_correo["para"], key="gantt_mail_to")
                     with col_m2:
-                        mail_cc = st.text_input("CC (Copia):", value="corte.laser@sigrama.com", key="gantt_mail_cc")
+                        mail_cc = st.text_input("CC (Copia):", value=config_correo["cc"], key="gantt_mail_cc")
                         
                     mail_subject = st.text_input("Asunto:", value="Plan de Producción y Programación de Corte Láser - SIGRAMA", key="gantt_mail_subject")
                     
