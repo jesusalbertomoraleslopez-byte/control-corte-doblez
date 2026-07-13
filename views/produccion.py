@@ -367,6 +367,134 @@ def view_planeacion():
                     hide_index=True,
                     height=250
                 )
+                
+                # 4. Sección de Envío por Correo (.eml)
+                st.markdown("---")
+                with st.expander("✉️ Compartir Plan de Corte por Correo (Outlook/Borrador)"):
+                    st.markdown("👇 **Descarga un archivo `.eml` (Borrador de Correo) con el plan de producción formateado en HTML y la base de datos Excel adjunta.**")
+                    
+                    col_m1, col_m2 = st.columns(2)
+                    with col_m1:
+                        mail_to = st.text_input("Para:", value="produccion@sigrama.com", key="gantt_mail_to")
+                    with col_m2:
+                        mail_cc = st.text_input("CC (Copia):", value="corte.laser@sigrama.com", key="gantt_mail_cc")
+                        
+                    mail_subject = st.text_input("Asunto:", value="Plan de Producción y Programación de Corte Láser - SIGRAMA", key="gantt_mail_subject")
+                    
+                    # Generar la tabla HTML
+                    html_table = """
+                    <table style="border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 14px; margin-top: 15px;">
+                        <thead>
+                            <tr style="background-color: #EC2024; color: white;">
+                                <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">OF</th>
+                                <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Cantidad Pzs.</th>
+                                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Inicio</th>
+                                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Días</th>
+                                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Fin Aproximado</th>
+                                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Avance Físico</th>
+                                <th style="padding: 10px; border: 1px solid #ddd; text-align: center;">Estado Manual</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                    """
+                    for idx, row in df_edited.iterrows():
+                        inicio_str = row["INICIO"].strftime("%d/%m/%Y") if row["INICIO"] else ""
+                        final_str = row["FINAL APROXIMADO"].strftime("%d/%m/%Y") if row["FINAL APROXIMADO"] else ""
+                        of_id = row["ORDENES DE FABRICACION"]
+                        real_pct = pct_map.get(of_id, 0.0)
+                        
+                        # Definir badge de color
+                        if real_pct >= 100.0:
+                            badge = '<span style="color: #28a745; font-weight: bold;">🟢 100% (Completado)</span>'
+                        elif real_pct > 0.0:
+                            badge = f'<span style="color: #ffc107; font-weight: bold;">🟡 {real_pct:.1f}% (En proceso)</span>'
+                        else:
+                            badge = '<span style="color: #6c757d; font-weight: bold;">⚪ 0% (Pendiente)</span>'
+                            
+                        html_table += f"""
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd;">{of_id}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">{row["CANTIDAD PZS."]}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{inicio_str}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{row["DIAS"]}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{final_str}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{badge}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{row["AVANCE"]}</td>
+                            </tr>
+                        """
+                    html_table += "</tbody></table>"
+                    
+                    # Cuerpo HTML completo
+                    html_body = f"""
+                    <html>
+                    <head>
+                        <meta charset="utf-8">
+                    </head>
+                    <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; margin: 0; padding: 20px; background-color: #f9f9f9;">
+                        <div style="max-width: 800px; margin: auto; border: 1px solid #e1e4e6; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); background-color: #ffffff;">
+                            <div style="background-color: #EC2024; color: white; padding: 20px; text-align: center;">
+                                <h1 style="margin: 0; font-size: 24px; font-weight: bold;">PLAN DE PRODUCCIÓN - CORTE LÁSER</h1>
+                                <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">Industria Sigrama - Control de Programación y Avances</p>
+                            </div>
+                            <div style="padding: 25px;">
+                                <p>Estimado equipo,</p>
+                                <p>Compartimos el plan de producción y la programación de fechas estimada para los trabajos en la estación de <strong>Corte Láser</strong>.</p>
+                                <p>A continuación se presenta el resumen de los estatus y avances físicos actuales:</p>
+                                
+                                <div style="margin: 20px 0;">
+                                    {html_table}
+                                </div>
+                                
+                                <p style="font-size: 13px; color: #666; background-color: #f8f9fa; padding: 15px; border-left: 4px solid #EC2024; border-radius: 4px; margin-top: 25px;">
+                                    <strong>Nota:</strong> Adjunto a este correo encontrará el archivo de la base de datos de producción <code>sigrama_database.xlsx</code> con el desglose detallado de nidos, piezas y rutas de fabricación correspondientes.
+                                </p>
+                                
+                                <p style="margin-top: 30px;">Atentamente,<br><strong>Supervisor de Corte Láser</strong><br>Industria Sigrama</p>
+                            </div>
+                            <div style="background-color: #f1f3f5; color: #868e96; text-align: center; padding: 12px; font-size: 11px; border-top: 1px solid #e9ecef;">
+                                Este es un reporte automático generado desde la aplicación de control de producción de SIGRAMA.
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                    """
+                    
+                    # Construir el objeto MIME
+                    from email.mime.multipart import MIMEMultipart
+                    from email.mime.text import MIMEText
+                    from email.mime.base import MIMEBase
+                    from email import encoders
+                    
+                    msg = MIMEMultipart('mixed')
+                    msg['To'] = mail_to
+                    msg['Cc'] = mail_cc
+                    msg['Subject'] = mail_subject
+                    msg['X-Unsent'] = '1'
+                    
+                    body_part = MIMEText(html_body, 'html', 'utf-8')
+                    msg.attach(body_part)
+                    
+                    excel_db_filename = "sigrama_database.xlsx"
+                    if os.path.exists(excel_db_filename):
+                        with open(excel_db_filename, 'rb') as f:
+                            excel_data = f.read()
+                        
+                        part = MIMEBase('application', 'octet-stream')
+                        part.set_payload(excel_data)
+                        encoders.encode_base64(part)
+                        part.add_header('Content-Disposition', 'attachment; filename="Plan_Produccion_SIGRAMA.xlsx"')
+                        msg.attach(part)
+                        
+                    eml_bytes = msg.as_bytes()
+                    
+                    st.download_button(
+                        label="✉️ Descargar Borrador de Correo (.eml)",
+                        data=eml_bytes,
+                        file_name="Plan_Produccion_Corte_Laser.eml",
+                        mime="message/rfc822",
+                        use_container_width=True,
+                        key="gantt_download_eml_btn"
+                    )
             else:
                 st.info("💡 Asigna fechas de inicio y duraciones en la tabla superior para dibujar el diagrama Gantt.")
 
