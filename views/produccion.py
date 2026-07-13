@@ -388,7 +388,7 @@ def view_planeacion():
                     today = datetime.date.today()
                     week_num = today.isocalendar()[1]
                     date_str = today.strftime("%d/%m/%Y")
-                    default_subject = f"Plan de Producción Corte Láser - Sem {week_num} ({date_str}) - SIGRAMA"
+                    default_subject = f"PLANTA METALES Plan de Producción Corte Láser - Sem {week_num} ({date_str}) - SIGRAMA"
                     
                     mail_subject = st.text_input("Asunto:", value=default_subject, key="gantt_mail_subject")
                     
