@@ -348,13 +348,24 @@ def view_planeacion():
                                     
                     return styles
                 
+                # Configurar anchos de columna súper compactos para que todo quepa en una sola pantalla sin scroll horizontal
+                column_config_gantt = {
+                    "ORDENES DE FABRICACION": st.column_config.TextColumn("OF", width=130),
+                    "INICIO": st.column_config.TextColumn("Inicio", width=80),
+                    "FINAL APROXIMADO": st.column_config.TextColumn("Final", width=80),
+                    "AVANCE REAL (CORTE)": st.column_config.TextColumn("Avance", width=80)
+                }
+                for col in date_cols:
+                    column_config_gantt[col] = st.column_config.TextColumn(col, width=42)
+                
                 # Mostrar tabla con estilo aplicado
                 df_gantt_styled = df_gantt_table.style.apply(style_gantt, axis=None)
                 st.dataframe(
                     df_gantt_styled,
+                    column_config=column_config_gantt,
                     use_container_width=True,
                     hide_index=True,
-                    height=300
+                    height=250
                 )
             else:
                 st.info("💡 Asigna fechas de inicio y duraciones en la tabla superior para dibujar el diagrama Gantt.")
