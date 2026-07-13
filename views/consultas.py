@@ -8,8 +8,10 @@ import xml.etree.ElementTree as ET
 import io
 from views.reportes import view_reportes
 
+from utils.database import get_connection as _get_db_connection
+
 def get_connection():
-    return sqlite3.connect("sigrama.db")
+    return _get_db_connection()
 
 def fetch_data(query, params=()):
     conn = get_connection()
