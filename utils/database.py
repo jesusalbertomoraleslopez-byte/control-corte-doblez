@@ -15,13 +15,24 @@ def git_sync_db():
     def _sync():
         try:
             if os.path.exists(EXCEL_DB_PATH):
+                import streamlit as st
+                try:
+                    token = st.secrets.get("GITHUB_TOKEN")
+                    if token:
+                        url = f"https://{token}@github.com/jesusalbertomoraleslopez-byte/control-corte-doblez.git"
+                        subprocess.run(["git", "remote", "set-url", "origin", url], capture_output=True)
+                except Exception:
+                    pass
+                
                 subprocess.run(["git", "add", EXCEL_DB_PATH], capture_output=True, timeout=15)
                 result = subprocess.run(
                     ["git", "commit", "-m", f"Auto-sync DB Excel {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
                     capture_output=True, timeout=15
                 )
-                if result.returncode == 0:
-                    subprocess.run(["git", "push", "origin", "main"], capture_output=True, timeout=30)
+                subprocess.run(
+                    ["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "push", "origin", "main"],
+                    capture_output=True, timeout=30
+                )
         except Exception:
             pass  # Silencioso: no romper la app si git falla
     threading.Thread(target=_sync, daemon=True).start()
