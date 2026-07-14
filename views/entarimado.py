@@ -7,9 +7,13 @@ def get_inventario_pt():
     conn = get_connection()
     # 1. Obtener avances acumulados en Empaque
     df_avances = pd.read_sql_query("""
-        SELECT a.of_number, a.no_pieza, p.nombre_pieza as descripcion, SUM(a.cantidad) as total_avances
+        SELECT a.of_number, a.no_pieza, p.descripcion, SUM(a.cantidad) as total_avances
         FROM avances a
-        JOIN piezas p ON a.of_number = p.of_number AND a.no_pieza = p.no_pieza
+        LEFT JOIN (
+            SELECT of_number, no_pieza, MIN(nombre_pieza) as descripcion
+            FROM piezas
+            GROUP BY of_number, no_pieza
+        ) p ON a.of_number = p.of_number AND a.no_pieza = p.no_pieza
         WHERE a.area = 'Empaque'
         GROUP BY a.of_number, a.no_pieza
     """, conn)
