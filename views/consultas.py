@@ -657,12 +657,23 @@ def view_consultas():
 
 
 def view_public_avance_diario():
-    # Establecer estilo del banner principal para la vista pública
-    banner_html = """
-    <div style="background: linear-gradient(135deg, #000000 0%, #222222 100%); 
-                border-radius: 8px; padding: 25px 35px; margin-bottom: 25px; 
-                box-shadow: 0 10px 20px rgba(0,0,0,0.1); position: relative; overflow: hidden;
-                display: flex; justify-content: space-between; align-items: center;">
+    import base64
+    import os
+    
+    # Obtener la ruta del logo de forma robusta
+    dir_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    logo_path = os.path.join(dir_path, "assets", "logo.png")
+    
+    if os.path.exists(logo_path):
+        try:
+            with open(logo_path, "rb") as img_f:
+                logo_base64 = base64.b64encode(img_f.read()).decode("utf-8")
+            logo_html = f'<img src="data:image/png;base64,{logo_base64}" style="height: 45px; vertical-align: middle;">'
+        except Exception:
+            logo_html = '<span style="color: white; font-weight: bold; font-size: 20px;">SIGRAMA</span>'
+    else:
+        # Fallback si no existe el archivo física
+        logo_html = """
         <div style="display: flex; align-items: center;">
             <svg width="45" height="45" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right: 15px;">
               <polygon points="0,0 100,0 100,15 0,30" fill="#EC2024" />
@@ -677,6 +688,17 @@ def view_public_avance_diario():
                     SIGRAMA
                 </span>
             </div>
+        </div>
+        """
+        
+    # Establecer estilo del banner principal para la vista pública
+    banner_html = f"""
+    <div style="background: linear-gradient(135deg, #000000 0%, #222222 100%); 
+                border-radius: 8px; padding: 25px 35px; margin-bottom: 25px; 
+                box-shadow: 0 10px 20px rgba(0,0,0,0.1); position: relative; overflow: hidden;
+                display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center;">
+            {logo_html}
         </div>
         <div style="text-align: right;">
             <span style="font-family: 'Montserrat', sans-serif; font-size: 16px; font-weight: 700; color: #EC2024;">REPORTE PÚBLICO</span><br>
