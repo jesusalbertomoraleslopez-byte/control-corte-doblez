@@ -237,6 +237,13 @@ def view_sgc():
 
 # --- Lógica Principal ---
 def main():
+    # Comprobar si se solicita la vista pública de avance diario sin requerir login
+    view_param = st.query_params.get("view")
+    if view_param == "avance_diario":
+        from views.consultas import view_public_avance_diario
+        view_public_avance_diario()
+        return
+
     check_login()
     
     if not st.session_state.logged_in:
