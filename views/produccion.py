@@ -169,7 +169,7 @@ def view_planeacion():
             def calc_final(row):
                 if pd.isna(row["INICIO"]):
                     return None
-                return (pd.to_datetime(row["INICIO"]) + pd.to_timedelta(row["DIAS"], unit='D')).date()
+                return (pd.to_datetime(row["INICIO"]) + pd.to_timedelta(row["DIAS"] - 1, unit='D')).date()
                 
             df_prog["FINAL APROXIMADO"] = df_prog.apply(calc_final, axis=1)
             
