@@ -113,6 +113,10 @@ def generate_plantilla_tarimas_excel(selected_tarima_ids):
     rows = cursor.fetchall()
     conn.close()
     
+    from openpyxl.styles import Alignment
+    from openpyxl.utils import get_column_letter
+    center_align = Alignment(horizontal="center", vertical="center")
+    
     for i, row in enumerate(rows):
         row_num = i + 2
         ws.cell(row=row_num, column=1, value=row[0]) # Tarima
@@ -122,6 +126,20 @@ def generate_plantilla_tarimas_excel(selected_tarima_ids):
         ws.cell(row=row_num, column=5, value=row[4] if row[4] else "") # Parcialidad
         ws.cell(row=row_num, column=6, value=row[5] if row[5] else "") # Descripcion
         ws.cell(row=row_num, column=7, value=row[6]) # Cantidad
+        
+        # Aplicar alineación centrada a las celdas de datos
+        for col_num in range(1, 8):
+            ws.cell(row=row_num, column=col_num).alignment = center_align
+            
+    # Auto-ajustar el ancho de las columnas basándose en el contenido
+    for col in ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            if cell.value is not None:
+                max_len = max(max_len, len(str(cell.value)))
+        # Dar un margen extra de 5 caracteres, con un mínimo de 12
+        ws.column_dimensions[col_letter].width = max(max_len + 5, 12)
         
     output = io.BytesIO()
     wb.save(output)
