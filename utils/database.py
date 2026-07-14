@@ -46,7 +46,8 @@ def sync_and_push_db():
         "avances": ["of_number", "nido", "no_pieza", "area", "operador", "maquina", "hoja", "timestamp"],
         "rechazos": ["of_number", "nido", "no_pieza", "area", "operador", "maquina", "hoja", "timestamp", "motivo"],
         "personal_areas": ["operador_nombre", "area"],
-        "config_correos": ["clave"]
+        "config_correos": ["clave"],
+        "tarimas": ["tarima_id", "no_pieza", "of_number"]
     }
 
     if has_remote:
@@ -138,7 +139,7 @@ def save_db_to_excel(conn=None):
         conn = sqlite3.connect(TEMP_DB_PATH)
         close_at_end = True
         
-    tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos"]
+    tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas"]
     temp_excel = "sigrama_database_temp.xlsx"
     try:
         with pd.ExcelWriter(temp_excel, engine='openpyxl') as writer:
@@ -195,7 +196,7 @@ def sync_excel_to_sqlite():
         excel_file = pd.ExcelFile(EXCEL_DB_PATH)
         sheets = excel_file.sheet_names
         
-        tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos"]
+        tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas"]
         for t in tables:
             best_match = next((s for s in sheets if s.lower() == t.lower()), None)
             if best_match:
@@ -346,7 +347,17 @@ def init_db_schema(conn=None):
             cc TEXT
         )
     ''')
-    
+    # 8. Tabla de Tarimas / Bultos
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tarimas (
+            tarima_id TEXT NOT NULL,
+            no_pieza TEXT NOT NULL,
+            of_number TEXT NOT NULL,
+            cantidad INTEGER NOT NULL,
+            timestamp TEXT NOT NULL,
+            PRIMARY KEY (tarima_id, no_pieza, of_number)
+        )
+    ''')
     try:
         check_and_seed_personal_areas(cursor)
     except Exception:
@@ -363,7 +374,7 @@ def clear_db():
     """Limpia todas las tablas."""
     conn = get_connection()
     c = conn.cursor()
-    for t in ["rechazos", "avances", "piezas", "nidos", "ordenes"]:
+    for t in ["rechazos", "avances", "piezas", "nidos", "ordenes", "tarimas"]:
         c.execute(f"DELETE FROM {t}")
     conn.commit()
     save_db_to_excel(conn)

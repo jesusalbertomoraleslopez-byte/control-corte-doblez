@@ -103,7 +103,8 @@ def render_sidebar():
         "2. CONSULTAS Y REPORTES",
         "3. PLANEACIÓN",
         "4. CONTROL DE PRODUCCIÓN",
-        "5. MANUFACTURA INTELIGENTE Y MANUAL"
+        "5. MANUFACTURA INTELIGENTE Y MANUAL",
+        "5.2 ENTARIMADO"
     ]
     
     if st.session_state.role == "Administrador":
@@ -228,6 +229,7 @@ from views.consultas import view_consultas
 from views.dashboard import view_dashboard
 from views.dashboard_global import view_dashboard_global
 from views.manufactura import view_manufactura
+from views.entarimado import view_entarimado
 
 # --- Vistas Principales (imported from views/) ---
 
@@ -293,6 +295,8 @@ def main():
             view_produccion()
         elif choice == "5. MANUFACTURA INTELIGENTE Y MANUAL":
             view_manufactura()
+        elif choice == "5.2 ENTARIMADO":
+            view_entarimado()
         elif choice == "6. MANTENIMIENTO":
             view_mantenimiento()
         elif choice == "7. SGC (Oculto - Solo Admin)":
