@@ -360,22 +360,22 @@ def view_entarimado():
                             total_others = res_tarimas[0] if res_tarimas[0] is not None else 0
                             conn.close()
                             
-                            max_qty = int(total_avances - total_others)
-                            if max_qty < 0:
-                                max_qty = 0
+                            max_allowed = int(total_avances - total_others)
+                            if max_allowed < 0:
+                                max_allowed = 0
                             
                             st.markdown(f"**SKU / Pieza:** `{no_pieza}` | **OF:** `{of_number}`")
-                            st.caption(f"Disponible total en PT (excluyendo este bulto): {total_avances - total_others} pzas. | Actual en bulto: {current_qty} pzas.")
+                            st.caption(f"Disponible total en PT (excluyendo este bulto): {max_allowed} pzas. | Actual en bulto: {current_qty} pzas.")
                             
+                            # Sin max_value para que Streamlit no bloquee/censure silenciosamente la entrada
                             new_qty = st.number_input(
                                 f"Cantidad para {no_pieza}:",
                                 min_value=0, # 0 para eliminar del bulto
-                                max_value=max(max_qty, int(current_qty)),
                                 value=int(current_qty),
                                 step=1,
                                 key=f"edit_qty_{edit_target}_{item_idx}"
                             )
-                            new_quantities[(no_pieza, of_number)] = new_qty
+                            new_quantities[(no_pieza, of_number)] = (new_qty, max_allowed)
                             
                         col_btn1, col_btn2 = st.columns(2)
                         with col_btn1:
@@ -384,29 +384,36 @@ def view_entarimado():
                             st.write("")
                             
                         if submit_edit:
-                            conn = get_connection()
-                            cursor = conn.cursor()
-                            for (no_pieza, of_number), new_qty in new_quantities.items():
-                                if new_qty == 0:
-                                    cursor.execute("""
-                                        DELETE FROM tarimas 
-                                        WHERE tarima_id = ? AND no_pieza = ? AND of_number = ?
-                                    """, (edit_target, no_pieza, of_number))
-                                else:
-                                    cursor.execute("""
-                                        UPDATE tarimas 
-                                        SET cantidad = ? 
-                                        WHERE tarima_id = ? AND no_pieza = ? AND of_number = ?
-                                    """, (new_qty, edit_target, no_pieza, of_number))
-                            conn.commit()
-                            conn.close()
-                            
-                            # Sincronizar Excel y GitHub
-                            save_db_to_excel()
-                            sync_and_push_db()
-                            
-                            st.success(f"✅ ¡Cantidades de `{edit_target}` actualizadas y sincronizadas!")
-                            st.rerun()
+                            has_error = False
+                            for (no_pieza, of_number), (new_qty, max_allowed) in new_quantities.items():
+                                if new_qty > max_allowed:
+                                    st.error(f"❌ La cantidad ingresada para `{no_pieza}` ({new_qty} pzas) supera el disponible real de esta OF en PT (máximo permitido: {max_allowed} pzas).")
+                                    has_error = True
+                                    
+                            if not has_error:
+                                conn = get_connection()
+                                cursor = conn.cursor()
+                                for (no_pieza, of_number), (new_qty, _) in new_quantities.items():
+                                    if new_qty == 0:
+                                        cursor.execute("""
+                                            DELETE FROM tarimas 
+                                            WHERE tarima_id = ? AND no_pieza = ? AND of_number = ?
+                                        """, (edit_target, no_pieza, of_number))
+                                    else:
+                                        cursor.execute("""
+                                            UPDATE tarimas 
+                                            SET cantidad = ? 
+                                            WHERE tarima_id = ? AND no_pieza = ? AND of_number = ?
+                                        """, (new_qty, edit_target, no_pieza, of_number))
+                                conn.commit()
+                                conn.close()
+                                
+                                # Sincronizar Excel y GitHub
+                                save_db_to_excel()
+                                sync_and_push_db()
+                                
+                                st.success(f"✅ ¡Cantidades de `{edit_target}` actualizadas y sincronizadas!")
+                                st.rerun()
                             
             st.markdown("---")
             st.markdown("### Acciones de Tarimas")
