@@ -164,30 +164,51 @@ def view_entarimado():
             
             st.markdown("##### 🔍 Filtrar y Seleccionar Pieza/SKU")
             
-            # Filtros para simplificar la búsqueda
-            col_f1, col_f2 = st.columns([1, 2])
+            # Filtros en cascada: OF -> SKU -> PO
+            col_f1, col_f2, col_f3 = st.columns(3)
+            
+            # 1. OF Filter
             with col_f1:
-                unique_ofs = sorted(df_inv_disponibles["OF"].unique())
+                unique_ofs = sorted([str(x) for x in df_inv_disponibles["OF"].unique() if x is not None])
                 of_filter = st.selectbox("📂 Filtrar por OF:", ["Todas"] + unique_ofs, key="filter_of_select")
             
-            # Filtrar según la OF elegida
-            df_sel_filtered = df_inv_disponibles
+            df_for_sku = df_inv_disponibles
             if of_filter != "Todas":
-                df_sel_filtered = df_sel_filtered[df_sel_filtered["OF"] == of_filter]
+                df_for_sku = df_for_sku[df_for_sku["OF"].astype(str) == of_filter]
                 
+            # 2. SKU Filter
             with col_f2:
-                # Selector de SKU/OF mejorado (comienza con el SKU para permitir búsqueda rápida escribiendo)
-                options = []
-                opt_map = {}
-                for idx, row in df_sel_filtered.iterrows():
-                    opt_str = f"SKU: {row['Producto/SKU']} | {row['Descripción']} (OF: {row['OF']} | Disp: {row['Disponible en PT']})"
-                    options.append(opt_str)
-                    opt_map[opt_str] = row
-                    
-                if not options:
-                    selected_opt = st.selectbox("🔍 Seleccionar Pieza / SKU a agregar:", ["No hay piezas disponibles"], disabled=True, key="select_sku_opt_disabled")
-                else:
-                    selected_opt = st.selectbox("🔍 Seleccionar Pieza / SKU (escribe para buscar):", options, key="select_sku_opt")
+                unique_skus = sorted([str(x) for x in df_for_sku["Producto/SKU"].unique() if x is not None])
+                sku_filter = st.selectbox("🏷️ Filtrar por Producto/SKU:", ["Todos"] + unique_skus, key="filter_sku_select")
+                
+            df_for_po = df_for_sku
+            if sku_filter != "Todos":
+                df_for_po = df_for_po[df_for_po["Producto/SKU"].astype(str) == sku_filter]
+                
+            # 3. PO Filter
+            with col_f3:
+                df_for_po_clean = df_for_po.copy()
+                df_for_po_clean["PO"] = df_for_po_clean["PO"].fillna("S/PO").astype(str)
+                unique_pos = sorted(df_for_po_clean["PO"].unique())
+                po_filter = st.selectbox("📋 Filtrar por PO:", ["Todas"] + unique_pos, key="filter_po_select")
+                
+            df_final_filtered = df_for_po_clean
+            if po_filter != "Todas":
+                df_final_filtered = df_final_filtered[df_final_filtered["PO"].astype(str) == po_filter]
+                
+            # Selector de pieza final de ancho completo
+            options = []
+            opt_map = {}
+            for idx, row in df_final_filtered.iterrows():
+                po_display = row['PO'] if pd.notna(row['PO']) and str(row['PO']).strip() != "" else "S/PO"
+                opt_str = f"{row['Producto/SKU']} (Disp: {row['Disponible en PT']} | OF: {row['OF']} | PO: {po_display})"
+                options.append(opt_str)
+                opt_map[opt_str] = df_inv_disponibles.loc[idx]
+                
+            if not options:
+                selected_opt = st.selectbox("🔍 Seleccionar Pieza / SKU a agregar:", ["No hay piezas coincidentes con los filtros"], disabled=True, key="select_sku_opt_disabled")
+            else:
+                selected_opt = st.selectbox("🔍 Seleccionar Pieza / SKU (escribe para buscar):", options, key="select_sku_opt")
             
             if selected_opt and selected_opt in opt_map:
                 selected_row = opt_map[selected_opt]
