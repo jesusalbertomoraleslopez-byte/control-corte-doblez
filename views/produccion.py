@@ -394,14 +394,6 @@ def view_planeacion():
                         of_id = row["ORDENES DE FABRICACION"]
                         real_pct = pct_map.get(of_id, 0.0)
                         
-                        # Definir colores del bloque
-                        if real_pct >= 100.0:
-                            cell_style = "background-color: #28a745; color: #28a745;" # Verde
-                        elif real_pct > 0.0:
-                            cell_style = "background-color: #ffc107; color: #ffc107;" # Amarillo
-                        else:
-                            cell_style = "background-color: #a0aab2; color: #a0aab2;" # Gris
-                        
                         # Obtener fechas del editor usando el índice
                         row_orig = df_edited.loc[idx]
                         row_start = row_orig["INICIO"]
@@ -409,6 +401,13 @@ def view_planeacion():
                         
                         row_start = pd.to_datetime(row_start).date() if pd.notna(row_start) else None
                         row_end = pd.to_datetime(row_end).date() if pd.notna(row_end) else None
+                        
+                        if row_start and row_end:
+                            total_days = (row_end - row_start).days + 1
+                            completed_days = (real_pct / 100.0) * total_days
+                        else:
+                            total_days = 0
+                            completed_days = 0.0
                         
                         for col in date_cols:
                             col_dt = date_col_mapping[col]
@@ -419,7 +418,20 @@ def view_planeacion():
                             
                             # Colorear celdas en el rango de la tarea
                             if row_start and row_end and row_start <= col_dt <= row_end:
-                                styles.at[idx, col] = cell_style
+                                d = (col_dt - row_start).days # Día actual (0-indexed)
+                                
+                                if real_pct == 0.0:
+                                    styles.at[idx, col] = "background-color: #a0aab2; color: #a0aab2;" # Gris (Sin iniciar)
+                                elif real_pct >= 100.0:
+                                    styles.at[idx, col] = "background-color: #28a745; color: #28a745;" # Verde (Completado)
+                                else:
+                                    if d + 1 <= completed_days:
+                                        styles.at[idx, col] = "background-color: #28a745; color: #28a745;" # Verde (Completado)
+                                    elif d < completed_days < d + 1:
+                                        p = int((completed_days - d) * 100)
+                                        styles.at[idx, col] = f"background: linear-gradient(to right, #28a745 {p}%, #ffc107 {p}%); color: #28a745;" # Relleno parcial
+                                    else:
+                                        styles.at[idx, col] = "background-color: #ffc107; color: #ffc107;" # Amarillo (Pendiente)
                                     
                     return styles
                 
@@ -550,9 +562,29 @@ def view_planeacion():
                         row_start = row["INICIO_DT"]
                         row_end = row["FINAL_DT"]
                         
+                        if pd.notna(row_start) and pd.notna(row_end):
+                            total_days = (row_end - row_start).days + 1
+                            completed_days = (real_pct / 100.0) * total_days
+                        else:
+                            total_days = 0
+                            completed_days = 0.0
+                            
                         for col_dt in date_mappings:
                             if pd.notna(row_start) and pd.notna(row_end) and row_start <= col_dt <= row_end:
-                                html_table += f'<td style="border: 1px solid #ddd; background-color: {color_hex}; width: 28px;"></td>'
+                                d = (col_dt - row_start).days
+                                if real_pct == 0.0:
+                                    html_table += '<td style="border: 1px solid #ddd; background-color: #a0aab2; width: 28px;"></td>'
+                                elif real_pct >= 100.0:
+                                    html_table += '<td style="border: 1px solid #ddd; background-color: #28a745; width: 28px;"></td>'
+                                else:
+                                    if d + 1 <= completed_days:
+                                        html_table += '<td style="border: 1px solid #ddd; background-color: #28a745; width: 28px;"></td>'
+                                    elif d < completed_days < d + 1:
+                                        p = int((completed_days - d) * 100)
+                                        # Usar linear-gradient con fallback de fondo sólido para mayor compatibilidad de correo
+                                        html_table += f'<td style="border: 1px solid #ddd; background-color: #ffc107; background: linear-gradient(to right, #28a745 {p}%, #ffc107 {p}%); width: 28px;"></td>'
+                                    else:
+                                        html_table += '<td style="border: 1px solid #ddd; background-color: #ffc107; width: 28px;"></td>'
                             else:
                                 if col_dt.weekday() in [5, 6]:
                                     html_table += '<td style="border: 1px solid #ddd; background-color: #e9ecef; width: 28px;"></td>'
