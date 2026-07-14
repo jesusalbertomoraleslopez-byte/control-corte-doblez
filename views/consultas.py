@@ -36,7 +36,7 @@ def view_consultas():
 
     # --- PESTAÑA 1: Avance del Día ---
     with tab1:
-        st.subheader("Reporte Diario de Avances")
+        st.subheader("Reporte Diario de Avances PLANTA METALES")
         selected_date = st.date_input("Selecciona el día a consultar:", datetime.today())
         
         # Format date as YYYY-MM-DD
@@ -707,7 +707,7 @@ def view_public_avance_diario():
     </div>
     """
     st.markdown(banner_html, unsafe_allow_html=True)
-    st.title("📅 Reporte Diario de Avances")
+    st.title("📅 Reporte Diario de Avances PLANTA METALES")
     
     selected_date = st.date_input("Selecciona el día a consultar:", datetime.today())
     
