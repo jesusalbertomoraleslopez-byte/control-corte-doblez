@@ -80,8 +80,10 @@ def get_next_bulto_name():
 def generate_plantilla_tarimas_excel(selected_tarima_ids):
     import openpyxl
     import io
+    import os
     
-    template_path = "plantilla_carga_tarimas_sigrama.xlsx"
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    template_path = os.path.join(base_dir, "plantilla_carga_tarimas_sigrama.xlsx")
     wb = openpyxl.load_workbook(template_path)
     ws = wb['Plantilla_Tarimas']
     
