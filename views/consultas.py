@@ -767,6 +767,196 @@ def view_public_avance_diario():
         st.dataframe(df_dia, height=220, use_container_width=True)
 
 
+def view_public_gantt():
+    st.markdown('<h2 style="margin-top:0; margin-bottom:10px; font-weight:900; font-family:\'Montserrat\'">📅 Programa de Producción (Diagrama de Gantt)</h2>', unsafe_allow_html=True)
+    st.markdown("Verde = Completado (100%), Amarillo = En Proceso, Gris = Pendiente (0%).")
+    
+    from utils.database import get_connection
+    from views.produccion import to_date_safe
+    
+    conn = get_connection()
+    df_pzs = pd.read_sql_query("""
+        SELECT p.of_number, SUM(p.cantidad * n.hojas) as total_piezas
+        FROM piezas p
+        JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+        GROUP BY p.of_number
+    """, conn)
+    
+    df_ordenes_gantt = pd.read_sql_query("""
+        SELECT of_number, proyecto, programador, po, prioridad, calibre, proyecto_cliente, gantt_inicio, gantt_dias, gantt_avance
+        FROM ordenes
+    """, conn)
+    
+    df_total_hojas = pd.read_sql_query("SELECT of_number, SUM(hojas) as total_hojas FROM nidos GROUP BY of_number", conn)
+    df_cortadas = pd.read_sql_query("""
+        SELECT of_number, COUNT(DISTINCT nido || '||' || hoja) as hojas_cortadas 
+        FROM avances 
+        WHERE area = 'Corte' AND hoja IS NOT NULL
+        GROUP BY of_number
+    """, conn)
+    conn.close()
+    
+    if df_ordenes_gantt.empty:
+        st.info("⚠️ No se encontraron Órdenes de Fabricación cargadas en el sistema.")
+        return
+        
+    total_hojas_map = df_total_hojas.set_index("of_number")["total_hojas"].to_dict()
+    cortadas_map = df_cortadas.set_index("of_number")["hojas_cortadas"].to_dict()
+    
+    pct_map = {}
+    for of_id in df_ordenes_gantt["of_number"]:
+        tot_h = total_hojas_map.get(of_id, 0)
+        cort_h = cortadas_map.get(of_id, 0)
+        pct_map[of_id] = (cort_h / tot_h * 100) if tot_h > 0 else 0.0
+        
+    df_prog = df_ordenes_gantt.merge(df_pzs, on="of_number", how="left")
+    df_prog["total_piezas"] = df_prog["total_piezas"].fillna(0).astype(int)
+    
+    df_prog["INICIO"] = df_prog["gantt_inicio"].apply(to_date_safe)
+    df_prog["INICIO"] = df_prog["INICIO"].fillna(datetime.date.today())
+    df_prog["DIAS"] = df_prog["gantt_dias"].fillna(1).astype(int)
+    df_prog["AVANCE"] = df_prog["gantt_avance"].fillna("PENDIENTE").astype(str)
+    
+    def calc_final(row):
+        start_dt = to_date_safe(row["INICIO"])
+        if not start_dt:
+            return None
+        return start_dt + datetime.timedelta(days=int(row["DIAS"]) - 1)
+        
+    df_prog["FINAL APROXIMADO"] = df_prog.apply(calc_final, axis=1)
+    
+    def get_of_consolidated_details(row):
+        parts = []
+        if pd.notna(row["po"]) and str(row["po"]).strip():
+            parts.append(f"PO: {str(row['po']).strip()}")
+        if pd.notna(row["proyecto_cliente"]) and str(row["proyecto_cliente"]).strip():
+            parts.append(f"Proy. Cliente: {str(row['proyecto_cliente']).strip()}")
+        elif pd.notna(row["proyecto"]) and str(row["proyecto"]).strip():
+            parts.append(f"Proy: {str(row['proyecto']).strip()}")
+        if pd.notna(row["total_piezas"]) and row["total_piezas"] > 0:
+            parts.append(f"Pzs: {int(row['total_piezas'])}")
+        return " | ".join(parts) if parts else "Sin detalles"
+        
+    df_prog["INFORMACIÓN DE LA OF"] = df_prog.apply(get_of_consolidated_details, axis=1)
+    
+    df_display = df_prog[["of_number", "INFORMACIÓN DE LA OF", "total_piezas", "INICIO", "FINAL APROXIMADO", "AVANCE"]].copy()
+    df_display.rename(columns={
+        "of_number": "ORDENES DE FABRICACION",
+        "total_piezas": "CANTIDAD PZS."
+    }, inplace=True)
+    
+    def get_avance_real_emoji(of_id):
+        pct = pct_map.get(of_id, 0.0)
+        if pct >= 100.0:
+            return f"🟢 {pct:.1f}%"
+        elif pct > 0.0:
+            return f"🟡 {pct:.1f}%"
+        else:
+            return f"⚪ {pct:.1f}%"
+            
+    df_display["AVANCE REAL (CORTE)"] = df_display["ORDENES DE FABRICACION"].map(get_avance_real_emoji)
+    
+    df_display = df_display[[
+        "ORDENES DE FABRICACION", "INFORMACIÓN DE LA OF", "CANTIDAD PZS.", "INICIO", 
+        "FINAL APROXIMADO", "AVANCE REAL (CORTE)", "AVANCE"
+    ]]
+    
+    valid_rows = df_display[df_display["INICIO"].notna() & df_display["FINAL APROXIMADO"].notna()].copy()
+    if not valid_rows.empty:
+        valid_rows["INICIO"] = valid_rows["INICIO"].apply(to_date_safe)
+        valid_rows["FINAL APROXIMADO"] = valid_rows["FINAL APROXIMADO"].apply(to_date_safe)
+        
+        db_min_date = valid_rows["INICIO"].min()
+        db_max_date = valid_rows["FINAL APROXIMADO"].max()
+        
+        today = datetime.date.today()
+        default_start = today - datetime.timedelta(days=7)
+        default_end = today + datetime.timedelta(days=21)
+        
+        min_date = max(db_min_date, default_start)
+        max_date = min(db_max_date, default_end)
+        
+        if min_date > max_date:
+            min_date = db_min_date
+            max_date = db_max_date
+            
+        date_range = pd.date_range(start=min_date, end=max_date)
+        if len(date_range) > 45:
+            date_range = date_range[:45]
+            max_date = date_range[-1].date()
+            
+        months_es = {1:"ene", 2:"feb", 3:"mar", 4:"abr", 5:"may", 6:"jun", 7:"jul", 8:"ago", 9:"sep", 10:"oct", 11:"nov", 12:"dic"}
+        
+        date_cols = []
+        date_col_mapping = {}
+        for dt in date_range:
+            col_name = f"{dt.day:02d}-{months_es[dt.month]}"
+            date_cols.append(col_name)
+            date_col_mapping[col_name] = dt.date()
+            
+        df_gantt_raw = df_display[["ORDENES DE FABRICACION", "INFORMACIÓN DE LA OF", "INICIO", "FINAL APROXIMADO", "AVANCE REAL (CORTE)"]].copy()
+        df_gantt_raw["INICIO_DT"] = df_gantt_raw["INICIO"].apply(to_date_safe)
+        df_gantt_raw["FINAL_DT"] = df_gantt_raw["FINAL APROXIMADO"].apply(to_date_safe)
+        
+        df_gantt_table = df_gantt_raw[
+            (df_gantt_raw["INICIO_DT"].notna()) &
+            (df_gantt_raw["FINAL_DT"].notna()) &
+            (df_gantt_raw["INICIO_DT"] <= max_date) &
+            (df_gantt_raw["FINAL_DT"] >= min_date)
+        ].copy()
+        
+        for col in date_cols:
+            df_gantt_table[col] = ""
+            
+        df_gantt_table["INICIO"] = df_gantt_table["INICIO_DT"].apply(lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else "")
+        df_gantt_table["FINAL APROXIMADO"] = df_gantt_table["FINAL_DT"].apply(lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else "")
+        df_gantt_table.drop(columns=["INICIO_DT", "FINAL_DT"], inplace=True)
+        
+        def style_gantt(df_to_style):
+            styles = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
+            for idx, row in df_to_style.iterrows():
+                of_id = row["ORDENES DE FABRICACION"]
+                real_pct = pct_map.get(of_id, 0.0)
+                
+                row_orig = df_display.loc[idx]
+                row_start = to_date_safe(row_orig["INICIO"])
+                row_end = to_date_safe(row_orig["FINAL APROXIMADO"])
+                
+                if real_pct >= 100.0:
+                    cell_style = "background-color: #28a745; color: #28a745;"
+                elif real_pct > 0.0:
+                    cell_style = "background-color: #ffc107; color: #ffc107;"
+                else:
+                    cell_style = "background-color: #a0aab2; color: #a0aab2;"
+                    
+                for col in date_cols:
+                    col_dt = date_col_mapping[col]
+                    if col_dt.weekday() in [5, 6]:
+                        styles.at[idx, col] = "background-color: #e9ecef;"
+                    if row_start and row_end and row_start <= col_dt <= row_end:
+                        styles.at[idx, col] = cell_style
+            return styles
+            
+        column_config_gantt = {
+            "ORDENES DE FABRICACION": st.column_config.TextColumn("OF", width=100),
+            "INFORMACIÓN DE LA OF": st.column_config.TextColumn("Información de la OF", width=220),
+            "INICIO": st.column_config.TextColumn("Inicio", width=80),
+            "FINAL APROXIMADO": st.column_config.TextColumn("Final", width=80),
+            "AVANCE REAL (CORTE)": st.column_config.TextColumn("Avance", width=80)
+        }
+        for col in date_cols:
+            column_config_gantt[col] = st.column_config.TextColumn(col, width=38)
+            
+        df_gantt_styled = df_gantt_table.style.apply(style_gantt, axis=None)
+        st.dataframe(
+            df_gantt_styled,
+            column_config=column_config_gantt,
+            use_container_width=True,
+            hide_index=True,
+            height=380
+        )
+
+
 def view_public_rotativo():
     import base64
     import os
@@ -795,7 +985,7 @@ def view_public_rotativo():
         
     current_screen = st.session_state.rotativo_screen
     
-    # Definir subtítulo y calcular la siguiente pantalla (rotación de 5 pantallas)
+    # Definir subtítulo y calcular la siguiente pantalla (rotación de 6 pantallas)
     if current_screen == 1:
         subtitle = "1. Dashboard Principal"
         next_screen = 2
@@ -803,13 +993,16 @@ def view_public_rotativo():
         subtitle = "2. Dashboard Global"
         next_screen = 3
     elif current_screen == 3:
-        subtitle = "3. Reporte Diario de Avances"
+        subtitle = "3. Programa de Producción"
         next_screen = 4
     elif current_screen == 4:
-        subtitle = "4. WIP en Piso (Reporte Global)"
+        subtitle = "4. Reporte Diario de Avances"
         next_screen = 5
+    elif current_screen == 5:
+        subtitle = "5. WIP en Piso (Reporte Global)"
+        next_screen = 6
     else:
-        subtitle = "5. Manufactura Inteligente"
+        subtitle = "6. Manufactura Inteligente"
         next_screen = 1
         
     # Banner principal
@@ -837,6 +1030,9 @@ def view_public_rotativo():
         view_dashboard_global()
         
     elif current_screen == 3:
+        view_public_gantt()
+        
+    elif current_screen == 4:
         # Avance Diario
         date_str = datetime.today().strftime("%Y-%m-%d")
         fecha_formateada = datetime.today().strftime("%d/%m/%Y")
@@ -892,7 +1088,7 @@ def view_public_rotativo():
             st.markdown("<p style='margin-top:5px; margin-bottom:2px; font-weight:bold; font-size:0.95rem;'>📋 Últimos Movimientos del Día</p>", unsafe_allow_html=True)
             st.dataframe(df_dia, height=200, use_container_width=True)
             
-    elif current_screen == 4:
+    elif current_screen == 5:
         # WIP en Piso
         st.markdown('<h2 style="margin-top:0; margin-bottom:10px; font-weight:900; font-family:\'Montserrat\'">🏭 WIP en Piso (Trabajo en Proceso)</h2>', unsafe_allow_html=True)
         from views.reportes import get_global_wip_for_ofs
