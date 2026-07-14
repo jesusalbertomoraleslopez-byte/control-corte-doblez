@@ -813,7 +813,7 @@ def view_public_gantt():
     df_prog["total_piezas"] = df_prog["total_piezas"].fillna(0).astype(int)
     
     df_prog["INICIO"] = df_prog["gantt_inicio"].apply(to_date_safe)
-    df_prog["INICIO"] = df_prog["INICIO"].fillna(datetime.date.today())
+    df_prog["INICIO"] = df_prog["INICIO"].fillna(datetime.today().date())
     df_prog["DIAS"] = df_prog["gantt_dias"].fillna(1).astype(int)
     df_prog["AVANCE"] = df_prog["gantt_avance"].fillna("PENDIENTE").astype(str)
     
@@ -821,7 +821,7 @@ def view_public_gantt():
         start_dt = to_date_safe(row["INICIO"])
         if not start_dt:
             return None
-        return start_dt + datetime.timedelta(days=int(row["DIAS"]) - 1)
+        return start_dt + timedelta(days=int(row["DIAS"]) - 1)
         
     df_prog["FINAL APROXIMADO"] = df_prog.apply(calc_final, axis=1)
     
@@ -869,9 +869,9 @@ def view_public_gantt():
         db_min_date = valid_rows["INICIO"].min()
         db_max_date = valid_rows["FINAL APROXIMADO"].max()
         
-        today = datetime.date.today()
-        default_start = today - datetime.timedelta(days=7)
-        default_end = today + datetime.timedelta(days=21)
+        today = datetime.today().date()
+        default_start = today - timedelta(days=7)
+        default_end = today + timedelta(days=21)
         
         min_date = max(db_min_date, default_start)
         max_date = min(db_max_date, default_end)
