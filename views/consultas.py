@@ -657,39 +657,15 @@ def view_consultas():
 
 
 def view_public_avance_diario():
-    # Establecer estilo del banner principal para la vista pública
-    import base64
     import os
     
-    # 1. Obtener la ruta del logo de forma robusta
     dir_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logo_path = os.path.join(dir_path, "assets", "logo.png")
+    banner_path = os.path.join(dir_path, "assets", "banner.png")
     
-    if os.path.exists(logo_path):
-        try:
-            with open(logo_path, "rb") as img_f:
-                logo_base64 = base64.b64encode(img_f.read()).decode("utf-8")
-            logo_html = f'<img src="data:image/png;base64,{logo_base64}" style="height: 40px; vertical-align: middle;">'
-        except Exception:
-            logo_html = '<span style="color: white; font-weight: bold; font-size: 18px;">SIGRAMA</span>'
+    if os.path.exists(banner_path):
+        st.image(banner_path, use_container_width=True)
     else:
-        logo_html = '<span style="color: white; font-weight: bold; font-size: 18px;">SIGRAMA</span>'
-        
-    banner_html = f"""
-    <div style="background: linear-gradient(135deg, #000000 0%, #222222 100%); 
-                border-radius: 6px; padding: 12px 25px; margin-bottom: 15px; 
-                box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: flex; 
-                justify-content: space-between; align-items: center;">
-        <div style="display: flex; align-items: center;">
-            {logo_html}
-        </div>
-        <div style="text-align: right;">
-            <span style="font-family: 'Montserrat', sans-serif; font-size: 13px; font-weight: 700; color: #EC2024;">REPORTE PÚBLICO</span><br>
-            <span style="font-family: 'Questrial', sans-serif; font-size: 9px; color: #aaa;">Monitoreo PLANTA METALES</span>
-        </div>
-    </div>
-    """
-    st.markdown(banner_html, unsafe_allow_html=True)
+        st.info("SIGRAMA - PLANTA METALES")
     
     # Selector de fecha compacto en la misma línea que el título
     col_t, col_d = st.columns([3, 1])
@@ -958,27 +934,12 @@ def view_public_gantt():
 
 
 def view_public_rotativo():
-    import base64
     import os
     import time
     from views.dashboard import view_dashboard
     from views.dashboard_global import view_dashboard_global
     from views.manufactura import view_manufactura
     
-    # 1. Obtener la ruta del logo de forma robusta
-    dir_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logo_path = os.path.join(dir_path, "assets", "logo.png")
-    
-    if os.path.exists(logo_path):
-        try:
-            with open(logo_path, "rb") as img_f:
-                logo_base64 = base64.b64encode(img_f.read()).decode("utf-8")
-            logo_html = f'<img src="data:image/png;base64,{logo_base64}" style="height: 40px; vertical-align: middle;">'
-        except Exception:
-            logo_html = '<span style="color: white; font-weight: bold; font-size: 18px;">SIGRAMA</span>'
-    else:
-        logo_html = '<span style="color: white; font-weight: bold; font-size: 18px;">SIGRAMA</span>'
-        
     # Inicializar el índice de pantalla en session_state si no existe
     if "rotativo_screen" not in st.session_state:
         st.session_state.rotativo_screen = 1
@@ -1005,22 +966,14 @@ def view_public_rotativo():
         subtitle = "6. Manufactura Inteligente"
         next_screen = 1
         
-    # Banner principal
-    banner_html = f"""
-    <div style="background: linear-gradient(135deg, #000000 0%, #222222 100%); 
-                border-radius: 6px; padding: 12px 25px; margin-bottom: 15px; 
-                box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: flex; 
-                justify-content: space-between; align-items: center;">
-        <div style="display: flex; align-items: center;">
-            {logo_html}
-        </div>
-        <div style="text-align: right;">
-            <span style="font-family: 'Montserrat', sans-serif; font-size: 13px; font-weight: 700; color: #EC2024;">TABLERO DE PLANTA (ROTATIVO)</span><br>
-            <span style="font-family: 'Questrial', sans-serif; font-size: 9px; color: #aaa;">{subtitle} — Rotación cada 15s</span>
-        </div>
-    </div>
-    """
-    st.markdown(banner_html, unsafe_allow_html=True)
+    # Banner principal (Imagen del banner corporativo)
+    dir_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    banner_path = os.path.join(dir_path, "assets", "banner.png")
+    
+    if os.path.exists(banner_path):
+        st.image(banner_path, use_container_width=True)
+    else:
+        st.info(f"TABLERO DE PLANTA — {subtitle}")
     
     # Mostrar la vista correspondiente
     if current_screen == 1:
