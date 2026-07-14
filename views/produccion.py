@@ -351,12 +351,13 @@ def view_planeacion():
                     max_date = date_range[-1].date()
                     
                 months_es = {1:"ene", 2:"feb", 3:"mar", 4:"abr", 5:"may", 6:"jun", 7:"jul", 8:"ago", 9:"sep", 10:"oct", 11:"nov", 12:"dic"}
+                days_es = {0: "Lun", 1: "Mar", 2: "Mie", 3: "Jue", 4: "Vie", 5: "Sab", 6: "Dom"}
                 
-                # Crear los encabezados de fechas (formato DD-mes)
+                # Crear los encabezados de fechas (formato Dia DD-mes)
                 date_cols = []
                 date_col_mapping = {}
                 for dt in date_range:
-                    col_name = f"{dt.day:02d}-{months_es[dt.month]}"
+                    col_name = f"{days_es[dt.weekday()]} {dt.day:02d}-{months_es[dt.month]}"
                     date_cols.append(col_name)
                     date_col_mapping[col_name] = dt.date()
                 
@@ -409,12 +410,16 @@ def view_planeacion():
                         row_start = pd.to_datetime(row_start).date() if pd.notna(row_start) else None
                         row_end = pd.to_datetime(row_end).date() if pd.notna(row_end) else None
                         
-                        if row_start and row_end:
-                            # Colorear celdas en el rango
-                            for col in date_cols:
-                                col_dt = date_col_mapping[col]
-                                if row_start <= col_dt <= row_end:
-                                    styles.at[idx, col] = cell_style
+                        for col in date_cols:
+                            col_dt = date_col_mapping[col]
+                            
+                            # Sombrear de gris si es sábado o domingo por defecto
+                            if col_dt.weekday() in [5, 6]:
+                                styles.at[idx, col] = "background-color: #e9ecef;"
+                            
+                            # Colorear celdas en el rango de la tarea
+                            if row_start and row_end and row_start <= col_dt <= row_end:
+                                styles.at[idx, col] = cell_style
                                     
                     return styles
                 
@@ -477,9 +482,11 @@ def view_planeacion():
                         max_date = date_range[-1].date()
                         
                     months_es = {1:"ene", 2:"feb", 3:"mar", 4:"abr", 5:"may", 6:"jun", 7:"jul", 8:"ago", 9:"sep", 10:"oct", 11:"nov", 12:"dic"}
+                    days_es = {0: "Lun", 1: "Mar", 2: "Mie", 3: "Jue", 4: "Vie", 5: "Sab", 6: "Dom"}
                     
                     for dt in date_range:
-                        col_name = f"{dt.day}<br><span style='font-size: 8px; text-transform: uppercase;'>{months_es[dt.month]}</span>"
+                        day_name = days_es[dt.weekday()]
+                        col_name = f"<span style='font-size: 7px; font-weight: normal; color: #ffe6e6;'>{day_name}</span><br>{dt.day}<br><span style='font-size: 7px; text-transform: uppercase;'>{months_es[dt.month]}</span>"
                         date_headers.append(col_name)
                         date_mappings.append(dt.date())
 
@@ -547,8 +554,11 @@ def view_planeacion():
                             if pd.notna(row_start) and pd.notna(row_end) and row_start <= col_dt <= row_end:
                                 html_table += f'<td style="border: 1px solid #ddd; background-color: {color_hex}; width: 28px;"></td>'
                             else:
-                                html_table += '<td style="border: 1px solid #ddd; background-color: #ffffff; width: 28px;"></td>'
-                                
+                                if col_dt.weekday() in [5, 6]:
+                                    html_table += '<td style="border: 1px solid #ddd; background-color: #e9ecef; width: 28px;"></td>'
+                                else:
+                                    html_table += '<td style="border: 1px solid #ddd; background-color: #ffffff; width: 28px;"></td>'
+                                    
                         html_table += "</tr>"
                     html_table += "</tbody></table>"
                     
