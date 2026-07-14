@@ -283,7 +283,7 @@ def view_entarimado():
                             # Insertar cada registro
                             for item in st.session_state.active_tarima_items:
                                 cursor.execute("""
-                                    INSERT INTO tarimas (tarima_id, no_pieza, of_number, cantidad, timestamp)
+                                    INSERT OR REPLACE INTO tarimas (tarima_id, no_pieza, of_number, cantidad, timestamp)
                                     VALUES (?, ?, ?, ?, ?)
                                 """, (bulto_name, item["Producto/SKU"], item["OF"], item["Cantidad"], now_str))
                                 
