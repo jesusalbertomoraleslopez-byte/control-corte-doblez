@@ -661,7 +661,7 @@ def view_public_avance_diario():
         """
         <style>
         html, body, [data-testid="stAppViewContainer"] {
-            zoom: 0.82 !important;
+            zoom: 0.88 !important;
         }
         .block-container {
             padding-top: 0rem !important;
@@ -990,7 +990,7 @@ def view_public_rotativo():
         """
         <style>
         html, body, [data-testid="stAppViewContainer"] {
-            zoom: 0.82 !important;
+            zoom: 0.88 !important;
         }
         .block-container {
             padding-top: 0rem !important;
