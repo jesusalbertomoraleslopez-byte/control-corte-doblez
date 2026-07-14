@@ -657,13 +657,28 @@ def view_consultas():
 
 
 def view_public_avance_diario():
-    import os
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-top: 0rem !important;
+            padding-bottom: 0rem !important;
+            margin-top: 0px !important;
+        }
+        header {
+            visibility: hidden;
+            height: 0px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     
     dir_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     banner_path = os.path.join(dir_path, "assets", "banner.png")
     
     if os.path.exists(banner_path):
-        col_b1, col_b2, col_b3 = st.columns([1, 2, 1])
+        col_b1, col_b2, col_b3 = st.columns([1, 3.7, 1])
         with col_b2:
             st.image(banner_path, use_container_width=True)
     else:
@@ -968,12 +983,29 @@ def view_public_rotativo():
         subtitle = "6. Manufactura Inteligente"
         next_screen = 1
         
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-top: 0rem !important;
+            padding-bottom: 0rem !important;
+            margin-top: 0px !important;
+        }
+        header {
+            visibility: hidden;
+            height: 0px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    
     # Banner principal (Imagen del banner corporativo)
     dir_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     banner_path = os.path.join(dir_path, "assets", "banner.png")
     
     if os.path.exists(banner_path):
-        col_b1, col_b2, col_b3 = st.columns([1, 2, 1])
+        col_b1, col_b2, col_b3 = st.columns([1, 3.7, 1])
         with col_b2:
             st.image(banner_path, use_container_width=True)
     else:
