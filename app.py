@@ -237,11 +237,15 @@ def view_sgc():
 
 # --- Lógica Principal ---
 def main():
-    # Comprobar si se solicita la vista pública de avance diario sin requerir login
+    # Comprobar si se solicita la vista pública (individual o rotativa) sin requerir login
     view_param = st.query_params.get("view")
     if view_param == "avance_diario":
         from views.consultas import view_public_avance_diario
         view_public_avance_diario()
+        return
+    elif view_param == "rotativo":
+        from views.consultas import view_public_rotativo
+        view_public_rotativo()
         return
 
     check_login()
