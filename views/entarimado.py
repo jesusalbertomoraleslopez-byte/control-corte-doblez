@@ -162,17 +162,34 @@ def view_entarimado():
             next_bulto = get_next_bulto_name()
             bulto_name = st.text_input("🏷️ Nombre de la Tarima / Bulto:", value=next_bulto, key="entarimado_bulto_name")
             
-            # Selector de SKU/OF
-            options = []
-            opt_map = {}
-            for idx, row in df_inv_disponibles.iterrows():
-                opt_str = f"OF: {row['OF']} | SKU: {row['Producto/SKU']} | {row['Descripción']} (Disp: {row['Disponible en PT']})"
-                options.append(opt_str)
-                opt_map[opt_str] = row
-                
-            selected_opt = st.selectbox("🔍 Seleccionar Pieza / SKU a agregar:", options)
+            st.markdown("##### 🔍 Filtrar y Seleccionar Pieza/SKU")
             
-            if selected_opt:
+            # Filtros para simplificar la búsqueda
+            col_f1, col_f2 = st.columns([1, 2])
+            with col_f1:
+                unique_ofs = sorted(df_inv_disponibles["OF"].unique())
+                of_filter = st.selectbox("📂 Filtrar por OF:", ["Todas"] + unique_ofs, key="filter_of_select")
+            
+            # Filtrar según la OF elegida
+            df_sel_filtered = df_inv_disponibles
+            if of_filter != "Todas":
+                df_sel_filtered = df_sel_filtered[df_sel_filtered["OF"] == of_filter]
+                
+            with col_f2:
+                # Selector de SKU/OF mejorado (comienza con el SKU para permitir búsqueda rápida escribiendo)
+                options = []
+                opt_map = {}
+                for idx, row in df_sel_filtered.iterrows():
+                    opt_str = f"SKU: {row['Producto/SKU']} | {row['Descripción']} (OF: {row['OF']} | Disp: {row['Disponible en PT']})"
+                    options.append(opt_str)
+                    opt_map[opt_str] = row
+                    
+                if not options:
+                    selected_opt = st.selectbox("🔍 Seleccionar Pieza / SKU a agregar:", ["No hay piezas disponibles"], disabled=True, key="select_sku_opt_disabled")
+                else:
+                    selected_opt = st.selectbox("🔍 Seleccionar Pieza / SKU (escribe para buscar):", options, key="select_sku_opt")
+            
+            if selected_opt and selected_opt in opt_map:
                 selected_row = opt_map[selected_opt]
                 max_cant = int(selected_row["Disponible en PT"])
                 
