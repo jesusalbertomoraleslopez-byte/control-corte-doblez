@@ -3,12 +3,49 @@ import pandas as pd
 import re
 import sys
 import os
+import datetime
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.plantilla_excel import generar_plantilla
 from utils.database import clear_db, clear_avances_rechazos, save_production_plan, get_active_of, get_todas_piezas, update_ruta_piezas
 from views.avances import view_avances, PROCESSES
 from views.reportes import view_reportes
 from views.correcciones import view_correcciones
+
+
+def to_date_safe(val):
+    """Convierte cualquier valor a un objeto datetime.date sin aplicar conversiones de zona horaria."""
+    if pd.isna(val) or val is None:
+        return None
+    if isinstance(val, datetime.date) and not isinstance(val, datetime.datetime):
+        return val
+    if isinstance(val, datetime.datetime):
+        return val.date()
+    if hasattr(val, "date"):
+        try:
+            return val.date()
+        except:
+            pass
+    val_str = str(val).strip()
+    if not val_str or val_str.lower() in ["none", "nat", "nan", "<nat>"]:
+        return None
+    # Eliminar parte de hora si existe
+    val_str = val_str.split()[0]
+    # Intentar parsear YYYY-MM-DD
+    try:
+        return datetime.datetime.strptime(val_str, "%Y-%m-%d").date()
+    except Exception:
+        pass
+    # Intentar parsear DD/MM/YYYY
+    try:
+        return datetime.datetime.strptime(val_str, "%d/%m/%Y").date()
+    except Exception:
+        pass
+    try:
+        return pd.to_datetime(val).date()
+    except Exception:
+        return None
+
 
 
 def reset_of():
@@ -159,7 +196,7 @@ def view_planeacion():
             df_prog["total_piezas"] = df_prog["total_piezas"].fillna(0).astype(int)
             
             # Formatear columnas
-            df_prog["INICIO"] = pd.to_datetime(df_prog["gantt_inicio"], errors='coerce').dt.date
+            df_prog["INICIO"] = df_prog["gantt_inicio"].apply(to_date_safe)
             # Si es nulo, usar la fecha de hoy por defecto
             df_prog["INICIO"] = df_prog["INICIO"].fillna(datetime.date.today())
             df_prog["DIAS"] = df_prog["gantt_dias"].fillna(1).astype(int)
@@ -167,9 +204,10 @@ def view_planeacion():
             
             # Calcular columna FINAL APROXIMADO
             def calc_final(row):
-                if pd.isna(row["INICIO"]):
+                start_dt = to_date_safe(row["INICIO"])
+                if not start_dt:
                     return None
-                return (pd.to_datetime(row["INICIO"]) + pd.to_timedelta(row["DIAS"] - 1, unit='D')).date()
+                return start_dt + datetime.timedelta(days=int(row["DIAS"]) - 1)
                 
             df_prog["FINAL APROXIMADO"] = df_prog.apply(calc_final, axis=1)
             
@@ -307,8 +345,8 @@ def view_planeacion():
             valid_rows = df_edited[df_edited["INICIO"].notna() & df_edited["FINAL APROXIMADO"].notna()].copy()
             if not valid_rows.empty:
                 # Asegurar de que son objetos date
-                valid_rows["INICIO"] = pd.to_datetime(valid_rows["INICIO"]).dt.date
-                valid_rows["FINAL APROXIMADO"] = pd.to_datetime(valid_rows["FINAL APROXIMADO"]).dt.date
+                valid_rows["INICIO"] = valid_rows["INICIO"].apply(to_date_safe)
+                valid_rows["FINAL APROXIMADO"] = valid_rows["FINAL APROXIMADO"].apply(to_date_safe)
                 
                 db_min_date = valid_rows["INICIO"].min()
                 db_max_date = valid_rows["FINAL APROXIMADO"].max()
@@ -365,8 +403,8 @@ def view_planeacion():
                 df_gantt_raw = df_edited[["ORDENES DE FABRICACION", "INFORMACIÓN DE LA OF", "INICIO", "FINAL APROXIMADO", "AVANCE REAL (CORTE)"]].copy()
                 
                 # Convertir a objetos date de forma segura para comparar
-                df_gantt_raw["INICIO_DT"] = pd.to_datetime(df_gantt_raw["INICIO"], errors='coerce').dt.date
-                df_gantt_raw["FINAL_DT"] = pd.to_datetime(df_gantt_raw["FINAL APROXIMADO"], errors='coerce').dt.date
+                df_gantt_raw["INICIO_DT"] = df_gantt_raw["INICIO"].apply(to_date_safe)
+                df_gantt_raw["FINAL_DT"] = df_gantt_raw["FINAL APROXIMADO"].apply(to_date_safe)
                 
                 # Filtrar filas traslapadas con el rango seleccionado
                 df_gantt_table = df_gantt_raw[
@@ -399,8 +437,8 @@ def view_planeacion():
                         row_start = row_orig["INICIO"]
                         row_end = row_orig["FINAL APROXIMADO"]
                         
-                        row_start = pd.to_datetime(row_start).date() if pd.notna(row_start) else None
-                        row_end = pd.to_datetime(row_end).date() if pd.notna(row_end) else None
+                        row_start = to_date_safe(row_start)
+                        row_end = to_date_safe(row_end)
                         
                         if row_start and row_end:
                             total_days = (row_end - row_start).days + 1
@@ -522,8 +560,8 @@ def view_planeacion():
                         <tbody>
                     """
                     df_email_raw = df_edited[["ORDENES DE FABRICACION", "INFORMACIÓN DE LA OF", "INICIO", "FINAL APROXIMADO"]].copy()
-                    df_email_raw["INICIO_DT"] = pd.to_datetime(df_email_raw["INICIO"], errors='coerce').dt.date
-                    df_email_raw["FINAL_DT"] = pd.to_datetime(df_email_raw["FINAL APROXIMADO"], errors='coerce').dt.date
+                    df_email_raw["INICIO_DT"] = df_email_raw["INICIO"].apply(to_date_safe)
+                    df_email_raw["FINAL_DT"] = df_email_raw["FINAL APROXIMADO"].apply(to_date_safe)
                     
                     df_email_rows = df_email_raw[
                         (df_email_raw["INICIO_DT"].notna()) &
