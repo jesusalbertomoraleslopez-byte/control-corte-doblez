@@ -660,6 +660,9 @@ def view_public_avance_diario():
     st.markdown(
         """
         <style>
+        html, body, [data-testid="stAppViewContainer"] {
+            zoom: 0.82 !important;
+        }
         .block-container {
             padding-top: 0rem !important;
             padding-bottom: 0rem !important;
@@ -986,6 +989,9 @@ def view_public_rotativo():
     st.markdown(
         """
         <style>
+        html, body, [data-testid="stAppViewContainer"] {
+            zoom: 0.82 !important;
+        }
         .block-container {
             padding-top: 0rem !important;
             padding-bottom: 0rem !important;
