@@ -358,3 +358,90 @@ def view_entarimado():
                         
                         st.success("✅ Bultos eliminados. El inventario disponible ha sido restaurado.")
                         st.rerun()
+                        
+                # Sección de edición si se selecciona exactamente 1 tarima
+                if len(selected_ids) == 1:
+                    st.markdown("---")
+                    st.markdown(f"#### ✏️ Editar Cantidades de `{selected_ids[0]}`")
+                    
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT no_pieza, of_number, cantidad 
+                        FROM tarimas 
+                        WHERE tarima_id = ?
+                    """, (selected_ids[0],))
+                    tarima_items = cursor.fetchall()
+                    conn.close()
+                    
+                    if tarima_items:
+                        with st.form(key=f"edit_form_{selected_ids[0]}"):
+                            new_quantities = {}
+                            for item_idx, (no_pieza, of_number, current_qty) in enumerate(tarima_items):
+                                # Calcular cantidad disponible máxima en PT para este item
+                                conn = get_connection()
+                                cursor = conn.cursor()
+                                cursor.execute("""
+                                    SELECT SUM(cantidad) 
+                                    FROM avances 
+                                    WHERE area = 'Empaque' AND of_number = ? AND no_pieza = ?
+                                """, (of_number, no_pieza))
+                                res_avances = cursor.fetchone()
+                                total_avances = res_avances[0] if res_avances[0] is not None else 0
+                                
+                                cursor.execute("""
+                                    SELECT SUM(cantidad) 
+                                    FROM tarimas 
+                                    WHERE of_number = ? AND no_pieza = ? AND tarima_id != ?
+                                """, (of_number, no_pieza, selected_ids[0]))
+                                res_tarimas = cursor.fetchone()
+                                total_others = res_tarimas[0] if res_tarimas[0] is not None else 0
+                                conn.close()
+                                
+                                max_qty = int(total_avances - total_others)
+                                if max_qty < 0:
+                                    max_qty = 0
+                                
+                                st.markdown(f"**SKU:** `{no_pieza}` | **OF:** `{of_number}`")
+                                st.caption(f"Disponible total en PT (excluyendo este bulto): {total_avances - total_others} pzas.")
+                                
+                                new_qty = st.number_input(
+                                    f"Cantidad para {no_pieza}:",
+                                    min_value=0, # 0 para eliminar del bulto
+                                    max_value=max(max_qty, int(current_qty)),
+                                    value=int(current_qty),
+                                    step=1,
+                                    key=f"edit_qty_{selected_ids[0]}_{item_idx}"
+                                )
+                                new_quantities[(no_pieza, of_number)] = new_qty
+                                
+                            col_btn1, col_btn2 = st.columns(2)
+                            with col_btn1:
+                                submit_edit = st.form_submit_button("💾 Guardar Cambios", use_container_width=True)
+                            with col_btn2:
+                                st.write("")
+                                
+                            if submit_edit:
+                                conn = get_connection()
+                                cursor = conn.cursor()
+                                for (no_pieza, of_number), new_qty in new_quantities.items():
+                                    if new_qty == 0:
+                                        cursor.execute("""
+                                            DELETE FROM tarimas 
+                                            WHERE tarima_id = ? AND no_pieza = ? AND of_number = ?
+                                        """, (selected_ids[0], no_pieza, of_number))
+                                    else:
+                                        cursor.execute("""
+                                            UPDATE tarimas 
+                                            SET cantidad = ? 
+                                            WHERE tarima_id = ? AND no_pieza = ? AND of_number = ?
+                                        """, (new_qty, selected_ids[0], no_pieza, of_number))
+                                conn.commit()
+                                conn.close()
+                                
+                                # Sincronizar Excel y GitHub
+                                save_db_to_excel()
+                                sync_and_push_db()
+                                
+                                st.success(f"✅ ¡Cantidades de `{selected_ids[0]}` actualizadas y sincronizadas!")
+                                st.rerun()
