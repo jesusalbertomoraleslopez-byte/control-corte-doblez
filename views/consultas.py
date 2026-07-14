@@ -801,7 +801,7 @@ def view_public_avance_diario():
 def view_public_rotativo():
     import base64
     import os
-    import streamlit.components.v1 as components
+    import time
     
     # 1. Obtener la ruta del logo de forma robusta
     dir_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -817,19 +817,22 @@ def view_public_rotativo():
     else:
         logo_html = '<span style="color: white; font-weight: bold; font-size: 20px;">SIGRAMA</span>'
         
-    # Obtener la pantalla actual (1, 2 o 3)
-    current_screen = st.query_params.get("screen", "1")
+    # Inicializar el índice de pantalla en session_state si no existe
+    if "rotativo_screen" not in st.session_state:
+        st.session_state.rotativo_screen = 1
+        
+    current_screen = st.session_state.rotativo_screen
     
     # Definir subtítulo y calcular la siguiente pantalla
-    if current_screen == "1":
+    if current_screen == 1:
         subtitle = "1. Reporte Diario de Avances"
-        next_screen = "2"
-    elif current_screen == "2":
+        next_screen = 2
+    elif current_screen == 2:
         subtitle = "2. Tendencia Semanal"
-        next_screen = "3"
+        next_screen = 3
     else:
         subtitle = "3. WIP en Piso (Reporte Global)"
-        next_screen = "1"
+        next_screen = 1
         
     # Banner principal
     banner_html = f"""
@@ -849,7 +852,7 @@ def view_public_rotativo():
     st.markdown(banner_html, unsafe_allow_html=True)
     
     # Mostrar la vista correspondiente
-    if current_screen == "1":
+    if current_screen == 1:
         st.title("📅 Reporte Diario de Avances PLANTA METALES")
         selected_date = st.date_input("Selecciona el día a consultar:", datetime.today())
         date_str = selected_date.strftime("%Y-%m-%d")
@@ -912,7 +915,7 @@ def view_public_rotativo():
             st.markdown("#### Detalle de Movimientos")
             st.dataframe(df_dia, use_container_width=True)
             
-    elif current_screen == "2":
+    elif current_screen == 2:
         st.title("📊 Tendencia Semanal por Área (Últimos 7 días)")
         fecha_fin = datetime.today()
         fecha_inicio = fecha_fin - timedelta(days=6)
@@ -944,14 +947,7 @@ def view_public_rotativo():
         st.title("🏭 WIP en Piso (Trabajo en Proceso)")
         view_reportes()
         
-    # Script JS para refrescar y avanzar a la siguiente pantalla tras 15 segundos
-    js_code = f"""
-    <script>
-    setTimeout(function() {{
-        var url = new URL(window.parent.location.href);
-        url.searchParams.set("screen", "{next_screen}");
-        window.parent.location.href = url.toString();
-    }}, 15000);
-    </script>
-    """
-    components.html(js_code, height=0)
+    # Avanzar la pantalla en session_state y forzar rerun tras esperar 15 segundos
+    st.session_state.rotativo_screen = next_screen
+    time.sleep(15)
+    st.rerun()
