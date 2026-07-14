@@ -296,6 +296,8 @@ def view_entarimado():
                             
                             st.success(f"✅ ¡{bulto_name} registrado y sincronizado exitosamente!")
                             st.session_state.active_tarima_items = []
+                            if "entarimado_bulto_name" in st.session_state:
+                                del st.session_state["entarimado_bulto_name"]
                             st.rerun()
                             
     with tab_historial:
