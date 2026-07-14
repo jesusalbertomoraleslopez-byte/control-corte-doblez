@@ -657,10 +657,11 @@ def view_consultas():
 
 
 def view_public_avance_diario():
+    # Establecer estilo del banner principal para la vista pública
     import base64
     import os
     
-    # Obtener la ruta del logo de forma robusta
+    # 1. Obtener la ruta del logo de forma robusta
     dir_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     logo_path = os.path.join(dir_path, "assets", "logo.png")
     
@@ -668,51 +669,38 @@ def view_public_avance_diario():
         try:
             with open(logo_path, "rb") as img_f:
                 logo_base64 = base64.b64encode(img_f.read()).decode("utf-8")
-            logo_html = f'<img src="data:image/png;base64,{logo_base64}" style="height: 45px; vertical-align: middle;">'
+            logo_html = f'<img src="data:image/png;base64,{logo_base64}" style="height: 40px; vertical-align: middle;">'
         except Exception:
-            logo_html = '<span style="color: white; font-weight: bold; font-size: 20px;">SIGRAMA</span>'
+            logo_html = '<span style="color: white; font-weight: bold; font-size: 18px;">SIGRAMA</span>'
     else:
-        # Fallback si no existe el archivo física
-        logo_html = """
-        <div style="display: flex; align-items: center;">
-            <svg width="45" height="45" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right: 15px;">
-              <polygon points="0,0 100,0 100,15 0,30" fill="#EC2024" />
-              <polygon points="0,40 100,25 100,75 0,60" fill="#EC2024" />
-              <polygon points="0,70 100,85 100,100 0,100" fill="#EC2024" />
-            </svg>
-            <div style="display: flex; flex-direction: column;">
-                <span style="font-family: 'Questrial', sans-serif; font-size: 12px; letter-spacing: 4px; color: white; line-height: 1; margin-bottom: -2px;">
-                    industria
-                </span>
-                <span style="font-family: 'Montserrat', sans-serif; font-size: 24px; font-weight: 900; font-style: italic; color: white; line-height: 1;">
-                    SIGRAMA
-                </span>
-            </div>
-        </div>
-        """
+        logo_html = '<span style="color: white; font-weight: bold; font-size: 18px;">SIGRAMA</span>'
         
-    # Establecer estilo del banner principal para la vista pública
     banner_html = f"""
     <div style="background: linear-gradient(135deg, #000000 0%, #222222 100%); 
-                border-radius: 8px; padding: 25px 35px; margin-bottom: 25px; 
-                box-shadow: 0 10px 20px rgba(0,0,0,0.1); position: relative; overflow: hidden;
-                display: flex; justify-content: space-between; align-items: center;">
+                border-radius: 6px; padding: 12px 25px; margin-bottom: 15px; 
+                box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: flex; 
+                justify-content: space-between; align-items: center;">
         <div style="display: flex; align-items: center;">
             {logo_html}
         </div>
         <div style="text-align: right;">
-            <span style="font-family: 'Montserrat', sans-serif; font-size: 16px; font-weight: 700; color: #EC2024;">REPORTE PÚBLICO</span><br>
-            <span style="font-family: 'Questrial', sans-serif; font-size: 11px; color: #aaa;">Monitoreo Diario de Planta</span>
+            <span style="font-family: 'Montserrat', sans-serif; font-size: 13px; font-weight: 700; color: #EC2024;">REPORTE PÚBLICO</span><br>
+            <span style="font-family: 'Questrial', sans-serif; font-size: 9px; color: #aaa;">Monitoreo PLANTA METALES</span>
         </div>
     </div>
     """
     st.markdown(banner_html, unsafe_allow_html=True)
-    st.title("📅 Reporte Diario de Avances PLANTA METALES")
     
-    selected_date = st.date_input("Selecciona el día a consultar:", datetime.today())
+    # Selector de fecha compacto en la misma línea que el título
+    col_t, col_d = st.columns([3, 1])
+    with col_d:
+        selected_date = st.date_input("Fecha de Consulta:", datetime.today(), label_visibility="collapsed")
     
-    # Format date as YYYY-MM-DD
     date_str = selected_date.strftime("%Y-%m-%d")
+    fecha_formateada = selected_date.strftime("%d/%m/%Y")
+    
+    with col_t:
+        st.markdown(f'<h2 style="margin:0; font-weight:900; font-family:\'Montserrat\'">📅 Avances PLANTA METALES ({fecha_formateada})</h2>', unsafe_allow_html=True)
     
     # Fetch advances for that day
     query_dia = """
@@ -737,71 +725,55 @@ def view_public_avance_diario():
     if df_dia.empty:
         st.info(f"No hay registros de avance para el {date_str}.")
     else:
-        # Agrupar por area
         avances_por_area = df_dia.groupby('Área')['Cantidad'].sum().to_dict()
         areas_orden = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque"]
+        process_icons = {"Ingenieria": "💻", "Corte": "✂️", "Rebabeo": "⚙️", "Doblez": "📐", "Barrenado": "🔩", "Liberado": "✅", "Empaque": "📦"}
         
-        process_icons = {
-            "Ingenieria": "💻",
-            "Corte": "✂️",
-            "Rebabeo": "⚙️",
-            "Doblez": "📐",
-            "Barrenado": "🔩",
-            "Liberado": "✅",
-            "Empaque": "📦"
-        }
-
-        # Formatear la fecha para que se vea bonita (ej. 30 / 06 / 2026)
-        fecha_formateada = selected_date.strftime("%d / %m / %Y")
-        st.markdown(
-            f'''
-            <div style="text-align: center; margin-bottom: 30px;">
-                <p style="margin: 0; font-size: 1.2rem; color: #555; font-weight: bold; text-transform: uppercase;">Resultados de Producción del Día</p>
-                <h1 style="margin: 0; font-size: 4rem; font-weight: 900; color: #111; font-family: 'Montserrat', sans-serif;">📅 {fecha_formateada}</h1>
-            </div>
-            ''', unsafe_allow_html=True
-        )
-
-        st.markdown("### 📊 Avances por Área")
-        cols = st.columns(4)
+        # 7 columnas en una fila única
+        cols = st.columns(7)
         for i, proc in enumerate(areas_orden):
-            with cols[i % 4]:
+            with cols[i]:
                 avance_val = avances_por_area.get(proc, 0)
                 rechazo_val = rechazos_por_area.get(proc, 0)
                 color = "#0056b3" if avance_val > 0 else "#6c757d"
                 icon = process_icons.get(proc, "🏭")
-                
-                # HTML para mostrar el numero de avance y a un lado el rechazo en pequeño siempre
-                rechazo_html = f'<span style="font-size: 1.2rem; color: #EC2024; font-weight: bold; margin-left: 5px;">/ {int(rechazo_val)}</span>'
+                rechazo_html = f'<span style="font-size: 0.9rem; color: #EC2024; font-weight: bold; margin-left: 2px;">/ {int(rechazo_val)}</span>'
                 
                 st.markdown(
                     f'''
-                    <div style="background-color: #f8f9fa; border-top: 5px solid {color}; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative;">
-                        <div style="font-size: 2.2rem; margin-bottom: 5px;">{icon}</div>
-                        <p style="margin: 0; font-size: 1.1rem; color: #555; font-weight: bold; text-transform: uppercase;">{proc}</p>
-                        <h2 style="margin: 5px 0 0 0; font-size: 3rem; font-weight: 900; color: {color}; display: flex; align-items: baseline; justify-content: center;">
+                    <div style="background-color: #f8f9fa; border-top: 4px solid {color}; padding: 10px 5px; border-radius: 6px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.08); margin-bottom: 10px;">
+                        <div style="font-size: 1.4rem; margin-bottom: 2px;">{icon}</div>
+                        <p style="margin: 0; font-size: 0.75rem; color: #666; font-weight: bold; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{proc}</p>
+                        <h3 style="margin: 2px 0 0 0; font-size: 1.6rem; font-weight: 900; color: {color}; display: flex; align-items: baseline; justify-content: center; line-height: 1.1;">
                             {int(avance_val):,} {rechazo_html}
-                        </h2>
+                        </h3>
                     </div>
                     ''', unsafe_allow_html=True
                 )
         
-        st.markdown("#### Detalle de Movimientos")
-        st.dataframe(df_dia, use_container_width=True)
-        
-        csv = convert_df(df_dia)
-        st.download_button(
-            label="📥 Descargar Reporte del Día (CSV)",
-            data=csv,
-            file_name=f'avance_{date_str}.csv',
-            mime='text/csv',
-        )
+        col_lbl, col_btn = st.columns([4, 1])
+        with col_lbl:
+            st.markdown("<p style='margin:0; font-weight:bold; font-size:1.0rem;'>📋 Detalle de Movimientos del Día</p>", unsafe_allow_html=True)
+        with col_btn:
+            csv = convert_df(df_dia)
+            st.download_button(
+                label="📥 Descargar CSV",
+                data=csv,
+                file_name=f'avance_{date_str}.csv',
+                mime='text/csv',
+                use_container_width=True
+            )
+            
+        st.dataframe(df_dia, height=220, use_container_width=True)
 
 
 def view_public_rotativo():
     import base64
     import os
     import time
+    from views.dashboard import view_dashboard
+    from views.dashboard_global import view_dashboard_global
+    from views.manufactura import view_manufactura
     
     # 1. Obtener la ruta del logo de forma robusta
     dir_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -811,11 +783,11 @@ def view_public_rotativo():
         try:
             with open(logo_path, "rb") as img_f:
                 logo_base64 = base64.b64encode(img_f.read()).decode("utf-8")
-            logo_html = f'<img src="data:image/png;base64,{logo_base64}" style="height: 45px; vertical-align: middle;">'
+            logo_html = f'<img src="data:image/png;base64,{logo_base64}" style="height: 40px; vertical-align: middle;">'
         except Exception:
-            logo_html = '<span style="color: white; font-weight: bold; font-size: 20px;">SIGRAMA</span>'
+            logo_html = '<span style="color: white; font-weight: bold; font-size: 18px;">SIGRAMA</span>'
     else:
-        logo_html = '<span style="color: white; font-weight: bold; font-size: 20px;">SIGRAMA</span>'
+        logo_html = '<span style="color: white; font-weight: bold; font-size: 18px;">SIGRAMA</span>'
         
     # Inicializar el índice de pantalla en session_state si no existe
     if "rotativo_screen" not in st.session_state:
@@ -825,27 +797,27 @@ def view_public_rotativo():
     
     # Definir subtítulo y calcular la siguiente pantalla
     if current_screen == 1:
-        subtitle = "1. Reporte Diario de Avances"
+        subtitle = "1. Dashboard Principal"
         next_screen = 2
     elif current_screen == 2:
-        subtitle = "2. Tendencia Semanal"
+        subtitle = "2. Dashboard Global"
         next_screen = 3
     else:
-        subtitle = "3. WIP en Piso (Reporte Global)"
+        subtitle = "3. Manufactura Inteligente"
         next_screen = 1
         
     # Banner principal
     banner_html = f"""
     <div style="background: linear-gradient(135deg, #000000 0%, #222222 100%); 
-                border-radius: 8px; padding: 25px 35px; margin-bottom: 25px; 
-                box-shadow: 0 10px 20px rgba(0,0,0,0.1); position: relative; overflow: hidden;
-                display: flex; justify-content: space-between; align-items: center;">
+                border-radius: 6px; padding: 12px 25px; margin-bottom: 15px; 
+                box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: flex; 
+                justify-content: space-between; align-items: center;">
         <div style="display: flex; align-items: center;">
             {logo_html}
         </div>
         <div style="text-align: right;">
-            <span style="font-family: 'Montserrat', sans-serif; font-size: 16px; font-weight: 700; color: #EC2024;">TABLERO DE PLANTA (ROTATIVO)</span><br>
-            <span style="font-family: 'Questrial', sans-serif; font-size: 11px; color: #aaa;">{subtitle} — Rotación cada 15s</span>
+            <span style="font-family: 'Montserrat', sans-serif; font-size: 13px; font-weight: 700; color: #EC2024;">TABLERO DE PLANTA (ROTATIVO)</span><br>
+            <span style="font-family: 'Questrial', sans-serif; font-size: 9px; color: #aaa;">{subtitle} — Rotación cada 15s</span>
         </div>
     </div>
     """
@@ -853,99 +825,11 @@ def view_public_rotativo():
     
     # Mostrar la vista correspondiente
     if current_screen == 1:
-        st.title("📅 Reporte Diario de Avances PLANTA METALES")
-        selected_date = st.date_input("Selecciona el día a consultar:", datetime.today())
-        date_str = selected_date.strftime("%Y-%m-%d")
-        
-        query_dia = """
-        SELECT of_number as OF, nido as Nido, no_pieza as Pieza, area as Área, 
-               cantidad as Cantidad, operador as Operador, maquina as Máquina, timestamp as Fecha_Hora
-        FROM avances 
-        WHERE date(timestamp) = ?
-        ORDER BY timestamp DESC
-        """
-        df_dia = fetch_data(query_dia, (date_str,))
-        
-        query_rechazos_dia = """
-        SELECT area as Área, sum(cantidad) as Cantidad
-        FROM rechazos 
-        WHERE date(timestamp) = ?
-        GROUP BY area
-        """
-        df_rechazos_dia = fetch_data(query_rechazos_dia, (date_str,))
-        rechazos_por_area = df_rechazos_dia.set_index('Área')['Cantidad'].to_dict() if not df_rechazos_dia.empty else {}
-        
-        if df_dia.empty:
-            st.info(f"No hay registros de avance para el {date_str}.")
-        else:
-            avances_por_area = df_dia.groupby('Área')['Cantidad'].sum().to_dict()
-            areas_orden = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque"]
-            process_icons = {"Ingenieria": "💻", "Corte": "✂️", "Rebabeo": "⚙️", "Doblez": "📐", "Barrenado": "🔩", "Liberado": "✅", "Empaque": "📦"}
-            
-            fecha_formateada = selected_date.strftime("%d / %m / %Y")
-            st.markdown(
-                f'''
-                <div style="text-align: center; margin-bottom: 30px;">
-                    <p style="margin: 0; font-size: 1.2rem; color: #555; font-weight: bold; text-transform: uppercase;">Resultados de Producción del Día</p>
-                    <h1 style="margin: 0; font-size: 4rem; font-weight: 900; color: #111; font-family: 'Montserrat', sans-serif;">📅 {fecha_formateada}</h1>
-                </div>
-                ''', unsafe_allow_html=True
-            )
-            
-            st.markdown("### 📊 Avances por Área")
-            cols = st.columns(4)
-            for i, proc in enumerate(areas_orden):
-                with cols[i % 4]:
-                    avance_val = avances_por_area.get(proc, 0)
-                    rechazo_val = rechazos_por_area.get(proc, 0)
-                    color = "#0056b3" if avance_val > 0 else "#6c757d"
-                    icon = process_icons.get(proc, "🏭")
-                    rechazo_html = f'<span style="font-size: 1.2rem; color: #EC2024; font-weight: bold; margin-left: 5px;">/ {int(rechazo_val)}</span>'
-                    st.markdown(
-                        f'''
-                        <div style="background-color: #f8f9fa; border-top: 5px solid {color}; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative;">
-                            <div style="font-size: 2.2rem; margin-bottom: 5px;">{icon}</div>
-                            <p style="margin: 0; font-size: 1.1rem; color: #555; font-weight: bold; text-transform: uppercase;">{proc}</p>
-                            <h2 style="margin: 5px 0 0 0; font-size: 3rem; font-weight: 900; color: {color}; display: flex; align-items: baseline; justify-content: center;">
-                                {int(avance_val):,} {rechazo_html}
-                            </h2>
-                        </div>
-                        ''', unsafe_allow_html=True
-                    )
-            st.markdown("#### Detalle de Movimientos")
-            st.dataframe(df_dia, use_container_width=True)
-            
+        view_dashboard()
     elif current_screen == 2:
-        st.title("📊 Tendencia Semanal por Área (Últimos 7 días)")
-        fecha_fin = datetime.today()
-        fecha_inicio = fecha_fin - timedelta(days=6)
-        
-        query_semana = """
-        SELECT date(timestamp) as Fecha, area as Área, sum(cantidad) as Total
-        FROM avances 
-        WHERE date(timestamp) BETWEEN ? AND ?
-        GROUP BY date(timestamp), area
-        ORDER BY date(timestamp)
-        """
-        df_semana = fetch_data(query_semana, (fecha_inicio.strftime("%Y-%m-%d"), fecha_fin.strftime("%Y-%m-%d")))
-        
-        if df_semana.empty:
-            st.info("No hay registros en los últimos 7 días.")
-        else:
-            areas_presentes = df_semana['Área'].unique()
-            for area in areas_presentes:
-                df_area = df_semana[df_semana['Área'] == area]
-                fig = px.bar(
-                    df_area, x='Fecha', y='Total', title=f"Avance en {area}", text='Total',
-                    color_discrete_sequence=['#EC2024']
-                )
-                fig.update_traces(textposition='outside')
-                fig.update_layout(xaxis_type='category', margin=dict(t=40, b=10, l=10, r=10))
-                st.plotly_chart(fig, use_container_width=True)
-                
+        view_dashboard_global()
     else:
-        st.title("🏭 WIP en Piso (Trabajo en Proceso)")
-        view_reportes()
+        view_manufactura()
         
     # Avanzar la pantalla en session_state y forzar rerun tras esperar 15 segundos
     st.session_state.rotativo_screen = next_screen
