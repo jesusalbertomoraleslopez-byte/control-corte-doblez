@@ -178,7 +178,7 @@ def view_entarimado():
             
             # Nombre de la tarima (Bulto_X)
             next_bulto = get_next_bulto_name()
-            bulto_name = st.text_input("🏷️ Nombre de la Tarima / Bulto:", value=next_bulto, key="entarimado_bulto_name")
+            bulto_name = st.text_input("🏷️ Nombre de la Tarima / Bulto:", value=next_bulto, key="entarimado_bulto_name", disabled=True)
             
             st.markdown("##### 🔍 Filtrar y Seleccionar Pieza/SKU")
             
