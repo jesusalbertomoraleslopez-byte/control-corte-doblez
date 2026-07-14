@@ -351,13 +351,13 @@ def view_planeacion():
                     max_date = date_range[-1].date()
                     
                 months_es = {1:"ene", 2:"feb", 3:"mar", 4:"abr", 5:"may", 6:"jun", 7:"jul", 8:"ago", 9:"sep", 10:"oct", 11:"nov", 12:"dic"}
-                days_es = {0: "Lun", 1: "Mar", 2: "Mie", 3: "Jue", 4: "Vie", 5: "Sab", 6: "Dom"}
+                days_es = {0: "Lun", 1: "Mar.", 2: "Mié.", 3: "Jue.", 4: "Vie.", 5: "Sáb.", 6: "Dom."}
                 
-                # Crear los encabezados de fechas (formato Dia DD-mes)
+                # Crear los encabezados de fechas (formato Dia\nDD-mes)
                 date_cols = []
                 date_col_mapping = {}
                 for dt in date_range:
-                    col_name = f"{days_es[dt.weekday()]} {dt.day:02d}-{months_es[dt.month]}"
+                    col_name = f"{days_es[dt.weekday()]}\n{dt.day:02d}-{months_es[dt.month]}"
                     date_cols.append(col_name)
                     date_col_mapping[col_name] = dt.date()
                 
