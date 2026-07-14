@@ -389,13 +389,12 @@ def view_planeacion():
                     max_date = date_range[-1].date()
                     
                 months_es = {1:"ene", 2:"feb", 3:"mar", 4:"abr", 5:"may", 6:"jun", 7:"jul", 8:"ago", 9:"sep", 10:"oct", 11:"nov", 12:"dic"}
-                days_es = {0: "Lun", 1: "Mar.", 2: "Mié.", 3: "Jue.", 4: "Vie.", 5: "Sáb.", 6: "Dom."}
                 
-                # Crear los encabezados de fechas (formato Dia\nDD-mes)
+                # Crear los encabezados de fechas (formato DD-mes)
                 date_cols = []
                 date_col_mapping = {}
                 for dt in date_range:
-                    col_name = f"{days_es[dt.weekday()]}\n{dt.day:02d}-{months_es[dt.month]}"
+                    col_name = f"{dt.day:02d}-{months_es[dt.month]}"
                     date_cols.append(col_name)
                     date_col_mapping[col_name] = dt.date()
                 
@@ -440,12 +439,13 @@ def view_planeacion():
                         row_start = to_date_safe(row_start)
                         row_end = to_date_safe(row_end)
                         
-                        if row_start and row_end:
-                            total_days = (row_end - row_start).days + 1
-                            completed_days = (real_pct / 100.0) * total_days
+                        # Definir colores del bloque
+                        if real_pct >= 100.0:
+                            cell_style = "background-color: #28a745; color: #28a745;" # Verde
+                        elif real_pct > 0.0:
+                            cell_style = "background-color: #ffc107; color: #ffc107;" # Amarillo
                         else:
-                            total_days = 0
-                            completed_days = 0.0
+                            cell_style = "background-color: #a0aab2; color: #a0aab2;" # Gris
                         
                         for col in date_cols:
                             col_dt = date_col_mapping[col]
@@ -456,20 +456,7 @@ def view_planeacion():
                             
                             # Colorear celdas en el rango de la tarea
                             if row_start and row_end and row_start <= col_dt <= row_end:
-                                d = (col_dt - row_start).days # Día actual (0-indexed)
-                                
-                                if real_pct == 0.0:
-                                    styles.at[idx, col] = "background-color: #a0aab2; color: #a0aab2;" # Gris (Sin iniciar)
-                                elif real_pct >= 100.0:
-                                    styles.at[idx, col] = "background-color: #28a745; color: #28a745;" # Verde (Completado)
-                                else:
-                                    if d + 1 <= completed_days:
-                                        styles.at[idx, col] = "background-color: #28a745; color: #28a745;" # Verde (Completado)
-                                    elif d < completed_days < d + 1:
-                                        p = int((completed_days - d) * 100)
-                                        styles.at[idx, col] = f"background: linear-gradient(to right, #28a745 {p}%, #ffc107 {p}%); color: #28a745;" # Relleno parcial
-                                    else:
-                                        styles.at[idx, col] = "background-color: #ffc107; color: #ffc107;" # Amarillo (Pendiente)
+                                styles.at[idx, col] = cell_style
                                     
                     return styles
                 
@@ -532,11 +519,9 @@ def view_planeacion():
                         max_date = date_range[-1].date()
                         
                     months_es = {1:"ene", 2:"feb", 3:"mar", 4:"abr", 5:"may", 6:"jun", 7:"jul", 8:"ago", 9:"sep", 10:"oct", 11:"nov", 12:"dic"}
-                    days_es = {0: "Lun", 1: "Mar", 2: "Mie", 3: "Jue", 4: "Vie", 5: "Sab", 6: "Dom"}
                     
                     for dt in date_range:
-                        day_name = days_es[dt.weekday()]
-                        col_name = f"<span style='font-size: 7px; font-weight: normal; color: #ffe6e6;'>{day_name}</span><br>{dt.day}<br><span style='font-size: 7px; text-transform: uppercase;'>{months_es[dt.month]}</span>"
+                        col_name = f"{dt.day}<br><span style='font-size: 8px; text-transform: uppercase;'>{months_es[dt.month]}</span>"
                         date_headers.append(col_name)
                         date_mappings.append(dt.date())
 
@@ -600,29 +585,9 @@ def view_planeacion():
                         row_start = row["INICIO_DT"]
                         row_end = row["FINAL_DT"]
                         
-                        if pd.notna(row_start) and pd.notna(row_end):
-                            total_days = (row_end - row_start).days + 1
-                            completed_days = (real_pct / 100.0) * total_days
-                        else:
-                            total_days = 0
-                            completed_days = 0.0
-                            
                         for col_dt in date_mappings:
                             if pd.notna(row_start) and pd.notna(row_end) and row_start <= col_dt <= row_end:
-                                d = (col_dt - row_start).days
-                                if real_pct == 0.0:
-                                    html_table += '<td style="border: 1px solid #ddd; background-color: #a0aab2; width: 28px;"></td>'
-                                elif real_pct >= 100.0:
-                                    html_table += '<td style="border: 1px solid #ddd; background-color: #28a745; width: 28px;"></td>'
-                                else:
-                                    if d + 1 <= completed_days:
-                                        html_table += '<td style="border: 1px solid #ddd; background-color: #28a745; width: 28px;"></td>'
-                                    elif d < completed_days < d + 1:
-                                        p = int((completed_days - d) * 100)
-                                        # Usar linear-gradient con fallback de fondo sólido para mayor compatibilidad de correo
-                                        html_table += f'<td style="border: 1px solid #ddd; background-color: #ffc107; background: linear-gradient(to right, #28a745 {p}%, #ffc107 {p}%); width: 28px;"></td>'
-                                    else:
-                                        html_table += '<td style="border: 1px solid #ddd; background-color: #ffc107; width: 28px;"></td>'
+                                html_table += f'<td style="border: 1px solid #ddd; background-color: {color_hex}; width: 28px;"></td>'
                             else:
                                 if col_dt.weekday() in [5, 6]:
                                     html_table += '<td style="border: 1px solid #ddd; background-color: #e9ecef; width: 28px;"></td>'
