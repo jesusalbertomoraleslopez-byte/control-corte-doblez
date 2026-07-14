@@ -795,15 +795,21 @@ def view_public_rotativo():
         
     current_screen = st.session_state.rotativo_screen
     
-    # Definir subtítulo y calcular la siguiente pantalla
+    # Definir subtítulo y calcular la siguiente pantalla (rotación de 5 pantallas)
     if current_screen == 1:
         subtitle = "1. Dashboard Principal"
         next_screen = 2
     elif current_screen == 2:
         subtitle = "2. Dashboard Global"
         next_screen = 3
+    elif current_screen == 3:
+        subtitle = "3. Reporte Diario de Avances"
+        next_screen = 4
+    elif current_screen == 4:
+        subtitle = "4. WIP en Piso (Reporte Global)"
+        next_screen = 5
     else:
-        subtitle = "3. Manufactura Inteligente"
+        subtitle = "5. Manufactura Inteligente"
         next_screen = 1
         
     # Banner principal
@@ -826,8 +832,108 @@ def view_public_rotativo():
     # Mostrar la vista correspondiente
     if current_screen == 1:
         view_dashboard()
+        
     elif current_screen == 2:
         view_dashboard_global()
+        
+    elif current_screen == 3:
+        # Avance Diario
+        date_str = datetime.today().strftime("%Y-%m-%d")
+        fecha_formateada = datetime.today().strftime("%d/%m/%Y")
+        
+        st.markdown(f'<h2 style="margin-top:0; margin-bottom:10px; font-weight:900; font-family:\'Montserrat\'">📅 Avance Diario PLANTA METALES ({fecha_formateada})</h2>', unsafe_allow_html=True)
+        
+        query_dia = """
+        SELECT of_number as OF, nido as Nido, no_pieza as Pieza, area as Área, 
+               cantidad as Cantidad, operador as Operador, maquina as Máquina, timestamp as Fecha_Hora
+        FROM avances 
+        WHERE date(timestamp) = ?
+        ORDER BY timestamp DESC
+        """
+        df_dia = fetch_data(query_dia, (date_str,))
+        
+        query_rechazos_dia = """
+        SELECT area as Área, sum(cantidad) as Cantidad
+        FROM rechazos 
+        WHERE date(timestamp) = ?
+        GROUP BY area
+        """
+        df_rechazos_dia = fetch_data(query_rechazos_dia, (date_str,))
+        rechazos_por_area = df_rechazos_dia.set_index('Área')['Cantidad'].to_dict() if not df_rechazos_dia.empty else {}
+        
+        if df_dia.empty:
+            st.info(f"No hay registros de avance para hoy ({fecha_formateada}).")
+        else:
+            avances_por_area = df_dia.groupby('Área')['Cantidad'].sum().to_dict()
+            areas_orden = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Liberado", "Empaque"]
+            process_icons = {"Ingenieria": "💻", "Corte": "✂️", "Rebabeo": "⚙️", "Doblez": "📐", "Barrenado": "🔩", "Liberado": "✅", "Empaque": "📦"}
+            
+            # 7 columnas en una fila única
+            cols = st.columns(7)
+            for i, proc in enumerate(areas_orden):
+                with cols[i]:
+                    avance_val = avances_por_area.get(proc, 0)
+                    rechazo_val = rechazos_por_area.get(proc, 0)
+                    color = "#0056b3" if avance_val > 0 else "#6c757d"
+                    icon = process_icons.get(proc, "🏭")
+                    rechazo_html = f'<span style="font-size: 0.9rem; color: #EC2024; font-weight: bold; margin-left: 2px;">/ {int(rechazo_val)}</span>'
+                    st.markdown(
+                        f'''
+                        <div style="background-color: #f8f9fa; border-top: 4px solid {color}; padding: 10px 5px; border-radius: 6px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.08); margin-bottom: 10px;">
+                            <div style="font-size: 1.4rem; margin-bottom: 2px;">{icon}</div>
+                            <p style="margin: 0; font-size: 0.75rem; color: #666; font-weight: bold; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{proc}</p>
+                            <h3 style="margin: 2px 0 0 0; font-size: 1.6rem; font-weight: 900; color: {color}; display: flex; align-items: baseline; justify-content: center; line-height: 1.1;">
+                                {int(avance_val):,} {rechazo_html}
+                            </h3>
+                        </div>
+                        ''', unsafe_allow_html=True
+                    )
+            
+            st.markdown("<p style='margin-top:5px; margin-bottom:2px; font-weight:bold; font-size:0.95rem;'>📋 Últimos Movimientos del Día</p>", unsafe_allow_html=True)
+            st.dataframe(df_dia, height=200, use_container_width=True)
+            
+    elif current_screen == 4:
+        # WIP en Piso
+        st.markdown('<h2 style="margin-top:0; margin-bottom:10px; font-weight:900; font-family:\'Montserrat\'">🏭 WIP en Piso (Trabajo en Proceso)</h2>', unsafe_allow_html=True)
+        from views.reportes import get_global_wip_for_ofs
+        wip_data = get_global_wip_for_ofs(["Todas"])
+        
+        if not wip_data:
+            st.info("No hay registros de WIP activos.")
+        else:
+            # 7 columnas para WIP
+            wip_areas = ["Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+            process_icons = {"Corte": "✂️", "Rebabeo": "⚙️", "Doblez": "📐", "Barrenado": "🔩", "Pintura": "🎨", "Liberado": "✅", "Empaque": "📦"}
+            
+            cols = st.columns(7)
+            for i, proc in enumerate(wip_areas):
+                with cols[i]:
+                    wip_val = wip_data.get(proc, 0)
+                    color = "#EC2024" if wip_val > 0 else "#28a745"
+                    icon = process_icons.get(proc, "🏭")
+                    
+                    st.markdown(
+                        f'''
+                        <div style="background-color: #f8f9fa; border-top: 4px solid {color}; padding: 10px 5px; border-radius: 6px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.08); margin-bottom: 10px;">
+                            <div style="font-size: 1.4rem; margin-bottom: 2px;">{icon}</div>
+                            <p style="margin: 0; font-size: 0.75rem; color: #666; font-weight: bold; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{proc}</p>
+                            <h3 style="margin: 2px 0 0 0; font-size: 1.6rem; font-weight: 900; color: {color}; line-height: 1.1;">
+                                {int(wip_val):,}
+                            </h3>
+                        </div>
+                        ''', unsafe_allow_html=True
+                    )
+            
+            # Gráfica de Pareto para el WIP
+            df_wip = pd.DataFrame([{"Estación": k, "Piezas": v} for k, v in wip_data.items() if k not in ["Ingenieria"]])
+            fig = px.bar(
+                df_wip, x="Estación", y="Piezas",
+                title="Distribución de Piezas en Espera", text="Piezas",
+                color="Piezas", color_continuous_scale="Reds"
+            )
+            fig.update_layout(height=320, margin=dict(t=40, b=10, l=10, r=10), coloraxis_showscale=False)
+            st.plotly_chart(fig, use_container_width=True)
+            
     else:
         view_manufactura()
         
