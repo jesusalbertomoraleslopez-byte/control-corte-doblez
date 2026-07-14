@@ -663,7 +663,9 @@ def view_public_avance_diario():
     banner_path = os.path.join(dir_path, "assets", "banner.png")
     
     if os.path.exists(banner_path):
-        st.image(banner_path, use_container_width=True)
+        col_b1, col_b2, col_b3 = st.columns([1, 2, 1])
+        with col_b2:
+            st.image(banner_path, use_container_width=True)
     else:
         st.info("SIGRAMA - PLANTA METALES")
     
@@ -971,7 +973,9 @@ def view_public_rotativo():
     banner_path = os.path.join(dir_path, "assets", "banner.png")
     
     if os.path.exists(banner_path):
-        st.image(banner_path, use_container_width=True)
+        col_b1, col_b2, col_b3 = st.columns([1, 2, 1])
+        with col_b2:
+            st.image(banner_path, use_container_width=True)
     else:
         st.info(f"TABLERO DE PLANTA — {subtitle}")
     
