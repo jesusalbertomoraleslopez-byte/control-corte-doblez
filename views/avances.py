@@ -9,7 +9,7 @@ BLACK = "#111111"
 GRAY = "#D2D3D5"
 WHITE = "#FFFFFF"
 
-PROCESSES = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque", "Almacen PT"]
+PROCESSES = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
 
 def view_avances():
     st.markdown("## 🏭 Panel de Operador - Registro de Avances")
@@ -83,7 +83,6 @@ def view_avances():
             "Pintura": ["Linea Continua", "Linea de Pintura"],
             "Liberado": ["Manual", "N/A"],
             "Empaque": ["Manual", "N/A"],
-            "Almacen PT": ["Manual", "N/A"],
             "Ingenieria": ["N/A"]
         }
         lista_maquinas = maquinas_por_area.get(area_seleccionada, ["N/A"])

@@ -138,7 +138,6 @@ def render_sidebar():
     av_pintura = av_dict.get("Pintura", 0)
     av_liberado = av_dict.get("Liberado", 0)
     av_empaque = av_dict.get("Empaque", 0)
-    av_almacen_pt = av_dict.get("Almacen PT", 0)
     
     wip_corte = wip_data.get("Corte", 0)
     wip_rebabeo = wip_data.get("Rebabeo", 0)
@@ -147,7 +146,6 @@ def render_sidebar():
     wip_pintura = wip_data.get("Pintura", 0)
     wip_liberado = wip_data.get("Liberado", 0)
     wip_empaque = wip_data.get("Empaque", 0)
-    wip_almacen_pt = wip_data.get("Almacen PT", 0)
     
     stats_html = f"""
     <div style="background-color: #1a1a1a; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #32CD32; font-family: 'Questrial', sans-serif;">
@@ -160,8 +158,7 @@ def render_sidebar():
             <div><b>Barrenado:</b> {av_barrenado:,}</div>
             <div><b>Pintura:</b> {av_pintura:,}</div>
             <div><b>Liberado:</b> {av_liberado:,}</div>
-            <div><b>Empaque:</b> {av_empaque:,}</div>
-            <div style="grid-column: span 2;"><b>Almacén PT:</b> {av_almacen_pt:,}</div>
+            <div style="grid-column: span 2;"><b>Empaque:</b> {av_empaque:,}</div>
         </div>
     </div>
  
@@ -174,8 +171,7 @@ def render_sidebar():
             <div><b>Por Barrenar:</b> {wip_barrenado:,}</div>
             <div><b>Por Pintar:</b> {wip_pintura:,}</div>
             <div><b>Por Liberar:</b> {wip_liberado:,}</div>
-            <div><b>Por Empacar:</b> {wip_empaque:,}</div>
-            <div><b>En Almacén PT:</b> {wip_almacen_pt:,}</div>
+            <div style="grid-column: span 2;"><b>Por Empacar:</b> {wip_empaque:,}</div>
         </div>
     </div>
     """

@@ -479,8 +479,7 @@ def view_reportes():
             "Barrenado": "🔩",
             "Pintura": "🎨",
             "Liberado": "✅",
-            "Empaque": "📦",
-            "Almacen PT": "🏪"
+            "Empaque": "📦"
         }
         
         friendly_names = {
@@ -490,8 +489,7 @@ def view_reportes():
             "Barrenado": "Piezas por barrenar",
             "Pintura": "Piezas por pintar",
             "Liberado": "Piezas por liberar",
-            "Empaque": "Piezas por empacar",
-            "Almacen PT": "Piezas en Almacén PT"
+            "Empaque": "Piezas por empacar"
         }
         
         for i, proc in enumerate(relevant_procs):
@@ -708,8 +706,7 @@ def view_reportes():
                 "Barrenado": "x-Barrenar",
                 "Pintura": "x-Pintar",
                 "Liberado": "x-Liberar",
-                "Empaque": "x-Empacar",
-                "Almacen PT": "x-Almacen PT"
+                "Empaque": "x-Empacar"
             }
             
             # Recopilar datos detallados de todas las áreas y construir el Consolidado

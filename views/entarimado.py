@@ -5,12 +5,12 @@ from utils.database import get_connection, save_db_to_excel, sync_and_push_db
 
 def get_inventario_pt():
     conn = get_connection()
-    # 1. Obtener avances acumulados en Almacen PT
+    # 1. Obtener avances acumulados en Empaque
     df_avances = pd.read_sql_query("""
         SELECT a.of_number, a.no_pieza, p.nombre_pieza as descripcion, SUM(a.cantidad) as total_avances
         FROM avances a
         JOIN piezas p ON a.of_number = p.of_number AND a.no_pieza = p.no_pieza
-        WHERE a.area = 'Almacen PT'
+        WHERE a.area = 'Empaque'
         GROUP BY a.of_number, a.no_pieza
     """, conn)
     
@@ -145,7 +145,7 @@ def view_entarimado():
     with tab_crear:
         st.markdown("### 1. Inventario Disponible en Almacén PT")
         if df_inv.empty or len(df_inv[df_inv["Disponible en PT"] > 0]) == 0:
-            st.info("⚠️ No hay piezas disponibles en Almacén PT para empaquetar en tarimas. Primero registra avances en la estación 'Almacen PT' en el Control de Producción.")
+            st.info("⚠️ No hay piezas disponibles en Almacén PT para empaquetar en tarimas. Primero registra avances en la estación 'Empaque' en el Control de Producción.")
         else:
             st.dataframe(df_inv[df_inv["Disponible en PT"] > 0], use_container_width=True, height=250, hide_index=True)
             
