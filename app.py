@@ -257,33 +257,38 @@ def main():
         
         # Banner Corporativo basado en Manual de Identidad
         import os
-        import base64
-        logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
-        if os.path.exists(logo_path):
-            try:
-                with open(logo_path, "rb") as img_f:
-                    logo_base64 = base64.b64encode(img_f.read()).decode("utf-8")
-                logo_html = f'<img src="data:image/png;base64,{logo_base64}" style="height: 40px; vertical-align: middle;">'
-            except Exception:
-                logo_html = '<span style="color: white; font-weight: bold; font-size: 18px;">SIGRAMA</span>'
+        banner_path = os.path.join(os.path.dirname(__file__), "assets", "banner.png")
+        
+        # Fin de configuracion lateral (se elimino la opcion de personalizar recursos)
+        if os.path.exists(banner_path):
+            st.image(banner_path, use_container_width=True)
         else:
-            logo_html = '<span style="color: white; font-weight: bold; font-size: 18px;">SIGRAMA</span>'
-            
-        banner_html = f"""
-        <div style="background: linear-gradient(135deg, #000000 0%, #222222 100%); 
-                    border-radius: 6px; padding: 12px 25px; margin-bottom: 15px; 
-                    box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: flex; 
-                    justify-content: space-between; align-items: center;">
-            <div style="display: flex; align-items: center;">
-                {logo_html}
-            </div>
-            <div style="text-align: right;">
-                <span style="font-family: 'Montserrat', sans-serif; font-size: 13px; font-weight: 700; color: #EC2024;">SISTEMA DE CONTROL</span><br>
-                <span style="font-family: 'Questrial', sans-serif; font-size: 9px; color: #aaa;">{choice} — PLANTA METALES</span>
-            </div>
-        </div>
-        """
-        st.markdown(banner_html, unsafe_allow_html=True)
+            banner_html = """
+<div style="background: linear-gradient(135deg, #000000 0%, #222222 100%); 
+            border-radius: 8px; padding: 30px 40px; margin-bottom: 25px; 
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1); position: relative; overflow: hidden;">
+    <!-- Elemento grafico de fondo -->
+    <div style="position: absolute; right: -50px; top: -50px; opacity: 0.05;">
+        <svg width="300" height="300" viewBox="0 0 100 100" fill="white">
+            <polygon points="0,0 100,0 100,15 0,30" />
+            <polygon points="0,40 100,25 100,75 0,60" />
+            <polygon points="0,70 100,85 100,100 0,100" />
+        </svg>
+    </div>
+    <h2 style="font-family: 'Questrial', sans-serif; color: white; margin: 0; font-size: 28px; font-weight: 400; letter-spacing: 1px;">
+        SOLUCIONES QUE
+    </h2>
+    <div style="display: inline-block; background-color: white; padding: 5px 15px; margin: 10px 0;">
+        <h2 style="font-family: 'Montserrat', sans-serif; color: #111111; margin: 0; font-size: 28px; font-weight: 700;">
+            TRANSFORMAN
+        </h2>
+    </div>
+    <h2 style="font-family: 'Montserrat', sans-serif; color: #EC2024; margin: 0; font-size: 28px; font-weight: 700;">
+        TU EMPRESA
+    </h2>
+</div>
+"""
+            st.markdown(banner_html, unsafe_allow_html=True)
         
         if choice == "1. DASHBOARD PRINCIPAL":
             view_dashboard()
