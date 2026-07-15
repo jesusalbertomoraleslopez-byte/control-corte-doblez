@@ -403,7 +403,20 @@ def style_excel_sheet(writer, df, sheet_name):
         worksheet.set_column(col_num, col_num, max_len, fmt)
 
 def view_reportes():
-    st.markdown("## 📊 Dashboard de Reportes y WIP Global")
+    # Obtener y formatear fecha en español
+    import datetime
+    dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+    today = datetime.date.today()
+    dia_nombre = dias_semana[today.weekday()]
+    mes_nombre = meses[today.month - 1]
+    fecha_grande = f"{dia_nombre}, {today.day} de {mes_nombre} de {today.year}"
+
+    col_title, col_date = st.columns([1.8, 1.2])
+    with col_title:
+        st.markdown('<h2 style="margin: 0; font-family: \'Montserrat\'; font-weight: 900; font-size: 1.8rem;">📊 Dashboard de Reportes y WIP Global</h2>', unsafe_allow_html=True)
+    with col_date:
+        st.markdown(f'<div style="text-align: right; padding-top: 5px;"><span style="font-size: 1.4rem; font-weight: 800; color: #EC2024; font-family: \'Montserrat\';">📅 {fecha_grande}</span></div>', unsafe_allow_html=True)
     
     # ── Top Filters ──────────────────────────────────────────────
     conn = get_connection()
