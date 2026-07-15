@@ -565,10 +565,21 @@ def view_consultas():
                             ]
                             num_cols = {5, 8, 9}  # Hojas, Cant/Hoja, Total Planeado
                             for c_idx, val in enumerate(vals):
-                                if c_idx in num_cols:
-                                    ws.write_number(data_row, c_idx, int(val), fmt_num_alt if alt else fmt_num)
+                                if pd.isna(val):
+                                    ws.write_blank(data_row, c_idx, "", fmt_alt if alt else fmt_cell)
+                                elif c_idx in num_cols:
+                                    try:
+                                        num_val = float(val)
+                                        if num_val.is_integer():
+                                            num_val = int(num_val)
+                                        ws.write_number(data_row, c_idx, num_val, fmt_num_alt if alt else fmt_num)
+                                    except (ValueError, TypeError):
+                                        ws.write(data_row, c_idx, str(val), fmt_alt if alt else fmt_cell)
                                 else:
-                                    ws.write(data_row, c_idx, val, fmt_alt if alt else fmt_cell)
+                                    cleaned_val = val
+                                    if not isinstance(cleaned_val, (str, int, float, bool)):
+                                        cleaned_val = str(cleaned_val)
+                                    ws.write(data_row, c_idx, cleaned_val, fmt_alt if alt else fmt_cell)
                             data_row += 1
 
                         ws.freeze_panes(start_row + 1, 0)
