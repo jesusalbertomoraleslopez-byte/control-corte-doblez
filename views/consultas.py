@@ -22,16 +22,207 @@ def fetch_data(query, params=()):
 def convert_df(df):
     return df.to_csv(index=False).encode('utf-8')
 
+def get_sample_req_excel():
+    import io
+    output = io.BytesIO()
+    df_sample = pd.DataFrame([
+        {"SKU": "12-D-6090-05", "Total": 10},
+        {"SKU": "11-A-6034-01", "Total": 25},
+        {"SKU": "NUEVA_PIEZA_EJEMPLO", "Total": 5}
+    ])
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_sample.to_excel(writer, index=False, sheet_name="Requerimiento")
+    return output.getvalue()
+
+def calculate_sku_wip_report(df_uploaded, of_list):
+    from utils.database import get_connection
+    from views.reportes import get_area_anterior
+    from views.avances import PROCESSES
+    
+    conn = get_connection()
+    if "Todas" in of_list:
+        df_db_pzs = pd.read_sql_query("SELECT of_number, no_pieza, cantidad, hojas, ruta, nido FROM piezas", conn)
+        df_avances = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances GROUP BY of_number, no_pieza, area", conn)
+        df_rechazos = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos GROUP BY of_number, no_pieza, area", conn)
+        
+        c = conn.cursor()
+        c.execute("""
+            SELECT n.of_number, n.nido 
+            FROM nidos n 
+            LEFT JOIN avances a ON n.of_number = a.of_number AND n.nido = a.nido AND a.area = 'Corte'
+            GROUP BY n.of_number, n.nido, n.hojas
+            HAVING COUNT(DISTINCT a.hoja) >= n.hojas
+        """)
+        nidos_cortados = set((row[0], row[1]) for row in c.fetchall())
+    else:
+        placeholders = ",".join(["?"] * len(of_list))
+        df_db_pzs = pd.read_sql_query(f"SELECT of_number, no_pieza, cantidad, hojas, ruta, nido FROM piezas WHERE of_number IN ({placeholders})", conn, params=tuple(of_list))
+        df_avances = pd.read_sql_query(f"SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number IN ({placeholders}) GROUP BY of_number, no_pieza, area", conn, params=tuple(of_list))
+        df_rechazos = pd.read_sql_query(f"SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number IN ({placeholders}) GROUP BY of_number, no_pieza, area", conn, params=tuple(of_list))
+        
+        c = conn.cursor()
+        c.execute(f"""
+            SELECT n.of_number, n.nido 
+            FROM nidos n 
+            LEFT JOIN avances a ON n.of_number = a.of_number AND n.nido = a.nido AND a.area = 'Corte'
+            WHERE n.of_number IN ({placeholders})
+            GROUP BY n.of_number, n.nido, n.hojas
+            HAVING COUNT(DISTINCT a.hoja) >= n.hojas
+        """, tuple(of_list))
+        nidos_cortados = set((row[0], row[1]) for row in c.fetchall())
+    conn.close()
+    
+    df_db_pzs["no_pieza"] = df_db_pzs["no_pieza"].astype(str).str.strip()
+    df_avances["no_pieza"] = df_avances["no_pieza"].astype(str).str.strip()
+    df_rechazos["no_pieza"] = df_rechazos["no_pieza"].astype(str).str.strip()
+    
+    df_db_pzs["total_requeridas"] = pd.to_numeric(df_db_pzs["cantidad"], errors="coerce").fillna(0) * pd.to_numeric(df_db_pzs["hojas"], errors="coerce").fillna(1)
+    
+    avances_map = df_avances.set_index(["of_number", "no_pieza", "area"])["cantidad"].to_dict()
+    rechazos_map = df_rechazos.set_index(["of_number", "no_pieza", "area"])["cantidad"].to_dict()
+    
+    areas_wip = ["Diseñar", "Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+    report_rows = []
+    
+    for _, row in df_uploaded.iterrows():
+        sku = str(row["SKU"]).strip()
+        total_req = int(row["Total"])
+        
+        df_p_db = df_db_pzs[df_db_pzs["no_pieza"] == sku]
+        
+        wip_row = {
+            "SKU": sku,
+            "Total": total_req,
+            "Piezas por Diseñar": 0,
+            "Piezas por Cortar": 0,
+            "Piezas por Rebabear": 0,
+            "Piezas por Doblar": 0,
+            "Piezas por Barrenar": 0,
+            "Piezas por Pintar": 0,
+            "Piezas por Liberar": 0,
+            "Piezas por Empacar": 0
+        }
+        
+        if df_p_db.empty:
+            wip_row["Piezas por Diseñar"] = total_req
+        else:
+            sku_wip = {a: 0 for a in areas_wip}
+            for (of_num, nido_num), grp in df_p_db.groupby(["of_number", "nido"]):
+                req_nido = int(grp["total_requeridas"].sum())
+                ruta_str = str(grp["ruta"].iloc[0])
+                ruta_proc = [p.strip() for p in ruta_str.split(",") if p.strip()]
+                
+                is_cortado = (of_num, nido_num) in nidos_cortados
+                if not is_cortado:
+                    corte_av = avances_map.get((of_num, sku, "Corte"), 0)
+                    sku_wip["Corte"] += max(0, req_nido - corte_av)
+                
+                for idx_proc, area in enumerate(ruta_proc):
+                    if area == "Corte":
+                        continue
+                    if idx_proc > 0:
+                        area_ant = ruta_proc[idx_proc - 1]
+                    else:
+                        area_ant = None
+                        
+                    if area_ant == "Corte" or area_ant is None:
+                        qty_in = avances_map.get((of_num, sku, "Corte"), 0)
+                    else:
+                        qty_in = avances_map.get((of_num, sku, area_ant), 0)
+                        
+                    qty_out = avances_map.get((of_num, sku, area), 0) + rechazos_map.get((of_num, sku, area), 0)
+                    wip_area_val = max(0, qty_in - qty_out)
+                    if area in sku_wip:
+                        sku_wip[area] += wip_area_val
+                        
+            wip_row["Piezas por Cortar"] = sku_wip.get("Corte", 0)
+            wip_row["Piezas por Rebabear"] = sku_wip.get("Rebabeo", 0)
+            wip_row["Piezas por Doblar"] = sku_wip.get("Doblez", 0)
+            wip_row["Piezas por Barrenar"] = sku_wip.get("Barrenado", 0)
+            wip_row["Piezas por Pintar"] = sku_wip.get("Pintura", 0)
+            wip_row["Piezas por Liberar"] = sku_wip.get("Liberado", 0)
+            wip_row["Piezas por Empacar"] = sku_wip.get("Empaque", 0)
+            
+        report_rows.append(wip_row)
+        
+    return pd.DataFrame(report_rows)
+
+def generate_sku_wip_report_excel(df_report):
+    import io
+    output = io.BytesIO()
+    
+    subtotales = {
+        "SKU": "Sub-Totales",
+        "Total": df_report["Total"].sum(),
+        "Piezas por Diseñar": df_report["Piezas por Diseñar"].sum(),
+        "Piezas por Cortar": df_report["Piezas por Cortar"].sum(),
+        "Piezas por Rebabear": df_report["Piezas por Rebabear"].sum(),
+        "Piezas por Doblar": df_report["Piezas por Doblar"].sum(),
+        "Piezas por Barrenar": df_report["Piezas por Barrenar"].sum(),
+        "Piezas por Pintar": df_report["Piezas por Pintar"].sum(),
+        "Piezas por Liberar": df_report["Piezas por Liberar"].sum(),
+        "Piezas por Empacar": df_report["Piezas por Empacar"].sum()
+    }
+    df_excel = pd.concat([df_report, pd.DataFrame([subtotales])], ignore_index=True)
+    
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_excel.to_excel(writer, sheet_name="Estatus WIP", index=False)
+        workbook = writer.book
+        worksheet = writer.sheets["Estatus WIP"]
+        
+        fmt_header = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 10,
+            "font_color": "#FFFFFF", "bg_color": "#EC2024",
+            "align": "center", "valign": "vcenter", "border": 1
+        })
+        fmt_cell = workbook.add_format({
+            "font_name": "Arial", "font_size": 9, "border": 1, "align": "center"
+        })
+        fmt_total = workbook.add_format({
+            "bold": True, "font_name": "Arial", "font_size": 10,
+            "bg_color": "#E2EFDA", "border": 1, "align": "center"
+        })
+        
+        for col_idx, col_name in enumerate(df_excel.columns):
+            worksheet.write(0, col_idx, col_name, fmt_header)
+            
+        num_rows = len(df_excel)
+        for r_idx in range(1, num_rows + 1):
+            is_totals_row = (r_idx == num_rows)
+            fmt = fmt_total if is_totals_row else fmt_cell
+            for c_idx in range(len(df_excel.columns)):
+                val = df_excel.iloc[r_idx - 1, c_idx]
+                if pd.isna(val):
+                    worksheet.write_blank(r_idx, c_idx, "", fmt)
+                else:
+                    try:
+                        num_val = float(val)
+                        if num_val.is_integer():
+                            num_val = int(num_val)
+                        worksheet.write_number(r_idx, c_idx, num_val, fmt)
+                    except (ValueError, TypeError):
+                        worksheet.write(r_idx, c_idx, str(val), fmt)
+                        
+        for col_idx, col in enumerate(df_excel.columns):
+            max_len = max(
+                df_excel[col].astype(str).map(len).max(),
+                len(str(col))
+            ) + 3
+            worksheet.set_column(col_idx, col_idx, max(max_len, 12))
+            
+    return output.getvalue()
+
 def view_consultas():
     st.title("2. CONSULTAS Y REPORTES")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📅 Avance del Día", 
         "📊 Avance Semanal", 
         "🔍 Trazabilidad", 
         "📉 Calidad (Rechazos)",
         "📦 Material Programado",
-        "🏭 WIP en Piso (Reportes)"
+        "🏭 WIP en Piso (Reportes)",
+        "📋 WIP por SKU / Req"
     ])
 
     # --- PESTAÑA 1: Avance del Día ---
@@ -665,6 +856,123 @@ def view_consultas():
     # --- PESTAÑA 6: WIP en Piso (Reportes) ---
     with tab6:
         view_reportes()
+
+    # --- PESTAÑA 7: WIP por SKU / Req ---
+    with tab7:
+        st.subheader("📋 Reporte de WIP por SKU / Requerimiento")
+        st.markdown(
+            "Este reporte te permite subir una lista de piezas (SKUs) y cantidades requeridas "
+            "para comparar su avance actual y ubicar físicamente el WIP en las distintas estaciones de la planta."
+        )
+        
+        col_pl, col_up = st.columns(2)
+        with col_pl:
+            st.markdown("##### Paso 1: Descarga la plantilla de requerimiento:")
+            sample_excel = get_sample_req_excel()
+            st.download_button(
+                label="📥 Descargar Plantilla Excel",
+                data=sample_excel,
+                file_name="Plantilla_Requerimiento_WIP.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        with col_up:
+            st.markdown("##### Sube el archivo completado:")
+            uploaded_file = st.file_uploader("Sube el Requerimiento (.xlsx o .csv):", type=["xlsx", "csv"], key="wip_req_file_uploader")
+            
+        if uploaded_file is not None:
+            try:
+                if uploaded_file.name.endswith(".csv"):
+                    df_uploaded = pd.read_csv(uploaded_file)
+                else:
+                    df_uploaded = pd.read_excel(uploaded_file)
+                    
+                # Detectar columnas
+                sku_col = None
+                for col in df_uploaded.columns:
+                    if str(col).strip().lower() in ["sku", "no_pieza", "parte", "no. parte", "artículo", "codigo", "código"]:
+                        sku_col = col
+                        break
+                if sku_col is None:
+                    sku_col = df_uploaded.columns[0]
+                    
+                total_col = None
+                for col in df_uploaded.columns:
+                    if str(col).strip().lower() in ["total", "cantidad", "cant", "req", "requerido", "volume", "qty", "cantidad requerida"]:
+                        total_col = col
+                        break
+                if total_col is None:
+                    total_col = df_uploaded.columns[1] if len(df_uploaded.columns) > 1 else None
+                    
+                if total_col is None:
+                    st.error("⚠️ El archivo debe tener al menos dos columnas (SKU y Total).")
+                else:
+                    df_uploaded = df_uploaded[[sku_col, total_col]].dropna(subset=[sku_col]).copy()
+                    df_uploaded.rename(columns={sku_col: "SKU", total_col: "Total"}, inplace=True)
+                    df_uploaded["SKU"] = df_uploaded["SKU"].astype(str).str.strip()
+                    df_uploaded["Total"] = pd.to_numeric(df_uploaded["Total"], errors="coerce").fillna(0).astype(int)
+                    
+                    st.markdown("---")
+                    st.markdown("##### Paso 2: Selecciona las OFs para filtrar el estatus de producción:")
+                    
+                    from utils.database import get_all_ofs
+                    all_ofs = get_all_ofs()
+                    sel_ofs = st.multiselect(
+                        "Selecciona las OFs (se buscarán los avances y nidos en estas órdenes):",
+                        ["Todas"] + all_ofs,
+                        default=["Todas"],
+                        key="wip_req_ofs_select"
+                    )
+                    
+                    if not sel_ofs:
+                        st.warning("⚠️ Debes seleccionar al menos una OF o 'Todas' para proceder.")
+                    else:
+                        st.markdown("---")
+                        st.markdown("##### Paso 3: Estatus de WIP Generado")
+                        
+                        with st.spinner("Calculando estatus de WIP por SKU..."):
+                            df_report = calculate_sku_wip_report(df_uploaded, sel_ofs)
+                            
+                        # Métricas
+                        diseños_pendientes = len(df_report[df_report["Piezas por Diseñar"] > 0])
+                        total_piezas_req = df_report["Total"].sum()
+                        
+                        col_m1, col_m2 = st.columns(2)
+                        with col_m1:
+                            st.metric("Total de Piezas Requeridas", f"{total_piezas_req:,} pzs")
+                        with col_m2:
+                            st.metric("Diseños Pendientes (SKUs nuevos)", f"{diseños_pendientes} SKUs", delta=f"{diseños_pendientes} por diseñar" if diseños_pendientes > 0 else "Todo diseñado", delta_color="inverse" if diseños_pendientes > 0 else "normal")
+                            
+                        # Generar fila de Totales
+                        subtotales = {
+                            "SKU": "Sub-Totales",
+                            "Total": df_report["Total"].sum(),
+                            "Piezas por Diseñar": df_report["Piezas por Diseñar"].sum(),
+                            "Piezas por Cortar": df_report["Piezas por Cortar"].sum(),
+                            "Piezas por Rebabear": df_report["Piezas por Rebabear"].sum(),
+                            "Piezas por Doblar": df_report["Piezas por Doblar"].sum(),
+                            "Piezas por Barrenar": df_report["Piezas por Barrenar"].sum(),
+                            "Piezas por Pintar": df_report["Piezas por Pintar"].sum(),
+                            "Piezas por Liberar": df_report["Piezas por Liberar"].sum(),
+                            "Piezas por Empacar": df_report["Piezas por Empacar"].sum()
+                        }
+                        df_display = pd.concat([df_report, pd.DataFrame([subtotales])], ignore_index=True)
+                        
+                        # Mostrar tabla
+                        st.dataframe(df_display, use_container_width=True, hide_index=True, height=400)
+                        
+                        # Descarga
+                        excel_report_bytes = generate_sku_wip_report_excel(df_report)
+                        st.download_button(
+                            label="📥 Descargar Reporte de Estatus de WIP (Excel)",
+                            data=excel_report_bytes,
+                            file_name="Reporte_Estatus_WIP_SKU.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            type="primary"
+                        )
+            except Exception as e:
+                st.error(f"❌ Error al procesar el archivo: {str(e)}")
 
 
 def view_public_avance_diario():
