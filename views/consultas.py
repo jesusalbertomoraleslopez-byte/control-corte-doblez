@@ -46,8 +46,8 @@ def calculate_sku_wip_report(df_uploaded, of_list):
             FROM piezas p
             LEFT JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
         """, conn)
-        df_avances = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances GROUP BY of_number, no_pieza, area", conn)
-        df_rechazos = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos GROUP BY of_number, no_pieza, area", conn)
+        df_avances = pd.read_sql_query("SELECT of_number, nido, no_pieza, area, SUM(cantidad) as cantidad FROM avances GROUP BY of_number, nido, no_pieza, area", conn)
+        df_rechazos = pd.read_sql_query("SELECT of_number, nido, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos GROUP BY of_number, nido, no_pieza, area", conn)
         
         c = conn.cursor()
         c.execute("""
@@ -66,8 +66,8 @@ def calculate_sku_wip_report(df_uploaded, of_list):
             LEFT JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
             WHERE p.of_number IN ({placeholders})
         """, conn, params=tuple(of_list))
-        df_avances = pd.read_sql_query(f"SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number IN ({placeholders}) GROUP BY of_number, no_pieza, area", conn, params=tuple(of_list))
-        df_rechazos = pd.read_sql_query(f"SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number IN ({placeholders}) GROUP BY of_number, no_pieza, area", conn, params=tuple(of_list))
+        df_avances = pd.read_sql_query(f"SELECT of_number, nido, no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number IN ({placeholders}) GROUP BY of_number, nido, no_pieza, area", conn, params=tuple(of_list))
+        df_rechazos = pd.read_sql_query(f"SELECT of_number, nido, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number IN ({placeholders}) GROUP BY of_number, nido, no_pieza, area", conn, params=tuple(of_list))
         
         c = conn.cursor()
         c.execute(f"""
@@ -87,8 +87,13 @@ def calculate_sku_wip_report(df_uploaded, of_list):
     
     df_db_pzs["total_requeridas"] = pd.to_numeric(df_db_pzs["cantidad"], errors="coerce").fillna(0) * pd.to_numeric(df_db_pzs["hojas"], errors="coerce").fillna(1)
     
-    avances_map = df_avances.set_index(["of_number", "no_pieza", "area"])["cantidad"].to_dict()
-    rechazos_map = df_rechazos.set_index(["of_number", "no_pieza", "area"])["cantidad"].to_dict()
+    avances_nido_map = df_avances.set_index(["of_number", "nido", "no_pieza", "area"])["cantidad"].to_dict()
+    rechazos_nido_map = df_rechazos.set_index(["of_number", "nido", "no_pieza", "area"])["cantidad"].to_dict()
+    
+    df_av_of = df_avances.groupby(["of_number", "no_pieza", "area"])["cantidad"].sum().reset_index()
+    df_re_of = df_rechazos.groupby(["of_number", "no_pieza", "area"])["cantidad"].sum().reset_index()
+    avances_of_map = df_av_of.set_index(["of_number", "no_pieza", "area"])["cantidad"].to_dict()
+    rechazos_of_map = df_re_of.set_index(["of_number", "no_pieza", "area"])["cantidad"].to_dict()
     
     areas_wip = ["Diseñar", "Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
     report_rows = []
@@ -116,16 +121,16 @@ def calculate_sku_wip_report(df_uploaded, of_list):
             wip_row["Piezas por Diseñar"] = total_req
         else:
             sku_wip = {a: 0 for a in areas_wip}
-            for (of_num, nido_num), grp in df_p_db.groupby(["of_number", "nido"]):
-                req_nido = int(grp["total_requeridas"].sum())
-                ruta_str = str(grp["ruta"].iloc[0])
+            for of_num, grp_of in df_p_db.groupby("of_number"):
+                for nido_num, grp_nido in grp_of.groupby("nido"):
+                    is_cortado = (of_num, nido_num) in nidos_cortados
+                    if not is_cortado:
+                        req_nido = int(grp_nido["total_requeridas"].sum())
+                        corte_av = avances_nido_map.get((of_num, nido_num, sku, "Corte"), 0)
+                        sku_wip["Corte"] += max(0, req_nido - corte_av)
+                
+                ruta_str = str(grp_of["ruta"].iloc[0])
                 ruta_proc = [p.strip() for p in ruta_str.split(",") if p.strip()]
-                
-                is_cortado = (of_num, nido_num) in nidos_cortados
-                if not is_cortado:
-                    corte_av = avances_map.get((of_num, sku, "Corte"), 0)
-                    sku_wip["Corte"] += max(0, req_nido - corte_av)
-                
                 for idx_proc, area in enumerate(ruta_proc):
                     if area == "Corte":
                         continue
@@ -135,11 +140,11 @@ def calculate_sku_wip_report(df_uploaded, of_list):
                         area_ant = None
                         
                     if area_ant == "Corte" or area_ant is None:
-                        qty_in = avances_map.get((of_num, sku, "Corte"), 0)
+                        qty_in = avances_of_map.get((of_num, sku, "Corte"), 0)
                     else:
-                        qty_in = avances_map.get((of_num, sku, area_ant), 0)
+                        qty_in = avances_of_map.get((of_num, sku, area_ant), 0)
                         
-                    qty_out = avances_map.get((of_num, sku, area), 0) + rechazos_map.get((of_num, sku, area), 0)
+                    qty_out = avances_of_map.get((of_num, sku, area), 0) + rechazos_of_map.get((of_num, sku, area), 0)
                     wip_area_val = max(0, qty_in - qty_out)
                     if area in sku_wip:
                         sku_wip[area] += wip_area_val
