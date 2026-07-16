@@ -41,7 +41,11 @@ def calculate_sku_wip_report(df_uploaded, of_list):
     
     conn = get_connection()
     if "Todas" in of_list:
-        df_db_pzs = pd.read_sql_query("SELECT of_number, no_pieza, cantidad, hojas, ruta, nido FROM piezas", conn)
+        df_db_pzs = pd.read_sql_query("""
+            SELECT p.of_number, p.no_pieza, p.cantidad, n.hojas, p.ruta, p.nido 
+            FROM piezas p
+            LEFT JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+        """, conn)
         df_avances = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances GROUP BY of_number, no_pieza, area", conn)
         df_rechazos = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos GROUP BY of_number, no_pieza, area", conn)
         
@@ -56,7 +60,12 @@ def calculate_sku_wip_report(df_uploaded, of_list):
         nidos_cortados = set((row[0], row[1]) for row in c.fetchall())
     else:
         placeholders = ",".join(["?"] * len(of_list))
-        df_db_pzs = pd.read_sql_query(f"SELECT of_number, no_pieza, cantidad, hojas, ruta, nido FROM piezas WHERE of_number IN ({placeholders})", conn, params=tuple(of_list))
+        df_db_pzs = pd.read_sql_query(f"""
+            SELECT p.of_number, p.no_pieza, p.cantidad, n.hojas, p.ruta, p.nido 
+            FROM piezas p
+            LEFT JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+            WHERE p.of_number IN ({placeholders})
+        """, conn, params=tuple(of_list))
         df_avances = pd.read_sql_query(f"SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number IN ({placeholders}) GROUP BY of_number, no_pieza, area", conn, params=tuple(of_list))
         df_rechazos = pd.read_sql_query(f"SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number IN ({placeholders}) GROUP BY of_number, no_pieza, area", conn, params=tuple(of_list))
         
