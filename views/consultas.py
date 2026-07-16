@@ -1032,11 +1032,11 @@ def view_public_avance_diario():
         """
         <style>
         html, body, [data-testid="stAppViewContainer"] {
-            zoom: 0.88 !important;
+            zoom: 0.82 !important;
         }
         .block-container {
             padding-top: 0rem !important;
-            padding-bottom: 0rem !important;
+            padding-bottom: 5rem !important;
             margin-top: 0px !important;
         }
         header {
@@ -1361,11 +1361,11 @@ def view_public_rotativo():
         """
         <style>
         html, body, [data-testid="stAppViewContainer"] {
-            zoom: 0.88 !important;
+            zoom: 0.82 !important;
         }
         .block-container {
             padding-top: 0rem !important;
-            padding-bottom: 0rem !important;
+            padding-bottom: 5rem !important;
             margin-top: 0px !important;
         }
         header {
