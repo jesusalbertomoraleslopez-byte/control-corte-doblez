@@ -120,42 +120,80 @@ def calculate_sku_wip_report(df_uploaded, of_list):
         if df_p_db.empty:
             wip_row["Piezas por Diseñar"] = total_req
         else:
-            sku_wip = {a: 0 for a in areas_wip}
-            for of_num, grp_of in df_p_db.groupby("of_number"):
-                for nido_num, grp_nido in grp_of.groupby("nido"):
-                    is_cortado = (of_num, nido_num) in nidos_cortados
-                    if not is_cortado:
-                        req_nido = int(grp_nido["total_requeridas"].sum())
-                        corte_av = avances_nido_map.get((of_num, nido_num, sku, "Corte"), 0)
-                        sku_wip["Corte"] += max(0, req_nido - corte_av)
-                
-                ruta_str = str(grp_of["ruta"].iloc[0])
-                ruta_proc = [p.strip() for p in ruta_str.split(",") if p.strip()]
-                for idx_proc, area in enumerate(ruta_proc):
-                    if area == "Corte":
-                        continue
+            system_wip = {a: 0 for a in areas_wip}
+            
+            # Obtener la ruta de la primera ocurrencia en base de datos
+            ruta_str = str(df_p_db["ruta"].iloc[0])
+            ruta_proc = [p.strip() for p in ruta_str.split(",") if p.strip()]
+            
+            # Calcular el WIP real de la base de datos por proceso
+            for idx_proc, area in enumerate(ruta_proc):
+                if area == "Corte":
+                    corte_wip_val = 0
+                    for (of_num, nido_num), grp_nido in df_p_db.groupby(["of_number", "nido"]):
+                        is_cortado = (of_num, nido_num) in nidos_cortados
+                        if not is_cortado:
+                            req_nido = int(grp_nido["total_requeridas"].sum())
+                            corte_av = avances_nido_map.get((of_num, nido_num, sku, "Corte"), 0)
+                            corte_wip_val += max(0, req_nido - corte_av)
+                    system_wip["Corte"] = corte_wip_val
+                else:
                     if idx_proc > 0:
                         area_ant = ruta_proc[idx_proc - 1]
                     else:
                         area_ant = None
                         
                     if area_ant == "Corte" or area_ant is None:
-                        qty_in = avances_of_map.get((of_num, sku, "Corte"), 0)
+                        qty_in = sum(avances_of_map.get((of_n, sku, "Corte"), 0) for of_n in df_p_db["of_number"].unique())
                     else:
-                        qty_in = avances_of_map.get((of_num, sku, area_ant), 0)
+                        qty_in = sum(avances_of_map.get((of_n, sku, area_ant), 0) for of_n in df_p_db["of_number"].unique())
                         
-                    qty_out = avances_of_map.get((of_num, sku, area), 0) + rechazos_of_map.get((of_num, sku, area), 0)
-                    wip_area_val = max(0, qty_in - qty_out)
-                    if area in sku_wip:
-                        sku_wip[area] += wip_area_val
-                        
-            wip_row["Piezas por Cortar"] = sku_wip.get("Corte", 0)
-            wip_row["Piezas por Rebabear"] = sku_wip.get("Rebabeo", 0)
-            wip_row["Piezas por Doblar"] = sku_wip.get("Doblez", 0)
-            wip_row["Piezas por Barrenar"] = sku_wip.get("Barrenado", 0)
-            wip_row["Piezas por Pintar"] = sku_wip.get("Pintura", 0)
-            wip_row["Piezas por Liberar"] = sku_wip.get("Liberado", 0)
-            wip_row["Piezas por Empacar"] = sku_wip.get("Empaque", 0)
+                    qty_out = sum(
+                        avances_of_map.get((of_n, sku, area), 0) + rechazos_of_map.get((of_n, sku, area), 0)
+                        for of_n in df_p_db["of_number"].unique()
+                    )
+                    system_wip[area] = max(0, qty_in - qty_out)
+                    
+            # Encontrar el último proceso válido de la ruta
+            last_area = None
+            for area in reversed(ruta_proc):
+                if area in areas_wip:
+                    last_area = area
+                    break
+                    
+            # Obtener cantidad completada (la que ya pasó por la última estación)
+            completed_qty = 0
+            if last_area:
+                completed_qty = sum(
+                    avances_of_map.get((of_n, sku, last_area), 0)
+                    for of_n in df_p_db["of_number"].unique()
+                )
+                
+            # Las piezas por ubicar en WIP son el total solicitado menos las que ya están terminadas
+            rem_total = max(0, total_req - completed_qty)
+            
+            # Distribuir rem_total de reversa en las estaciones del proceso
+            assigned_wip = {a: 0 for a in areas_wip}
+            for area in reversed(ruta_proc):
+                if area in areas_wip:
+                    val = system_wip.get(area, 0)
+                    assigned = min(rem_total, val)
+                    assigned_wip[area] = assigned
+                    rem_total -= assigned
+                    
+            # Si aún sobra rem_total, lo dejamos en Corte (por iniciar)
+            if "Corte" in assigned_wip:
+                assigned_wip["Corte"] += rem_total
+            else:
+                assigned_wip["Corte"] = rem_total
+                
+            wip_row["Piezas por Cortar"] = assigned_wip.get("Corte", 0)
+            wip_row["Piezas por Rebabear"] = assigned_wip.get("Rebabeo", 0)
+            wip_row["Piezas por Doblar"] = assigned_wip.get("Doblez", 0)
+            wip_row["Piezas por Barrenar"] = assigned_wip.get("Barrenado", 0)
+            wip_row["Piezas por Pintar"] = assigned_wip.get("Pintura", 0)
+            wip_row["Piezas por Liberar"] = assigned_wip.get("Liberado", 0)
+            wip_row["Piezas por Empacar"] = assigned_wip.get("Empaque", 0)
             
         report_rows.append(wip_row)
         
