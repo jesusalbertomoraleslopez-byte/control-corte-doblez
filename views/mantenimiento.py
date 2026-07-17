@@ -729,18 +729,24 @@ def view_mantenimiento_admin():
     
     from utils.database import get_config_correo, save_config_correo
     
-    # 1. Cargar configuración actual para plan de producción
+    # 1. Cargar configuración actual para plan de producción y reporte de WIP
     config_plan = get_config_correo("plan_produccion", "produccion@sigrama.com", "corte.laser@sigrama.com")
+    config_wip = get_config_correo("wip_report", "produccion@sigrama.com", "corte.laser@sigrama.com")
     
     with st.form("form_config_correos"):
         st.markdown("##### 📅 Reporte de Plan de Producción / Corte Láser")
         c_para = st.text_input("Para (Destinatarios principales - Separados por coma):", value=config_plan["para"])
         c_cc = st.text_input("CC (Copia - Separados por coma):", value=config_plan["cc"])
         
+        st.markdown("##### 📊 Reporte de Estatus de WIP")
+        w_para = st.text_input("Para WIP (Destinatarios principales - Separados por coma):", value=config_wip["para"])
+        w_cc = st.text_input("CC WIP (Copia - Separados por coma):", value=config_wip["cc"])
+        
         btn_save_config = st.form_submit_button("💾 Guardar Configuración de Correos")
         
         if btn_save_config:
             save_config_correo("plan_produccion", c_para.strip(), c_cc.strip())
+            save_config_correo("wip_report", w_para.strip(), w_cc.strip())
             st.success("✅ ¡Configuración de correos guardada y sincronizada exitosamente!")
             st.rerun()
 

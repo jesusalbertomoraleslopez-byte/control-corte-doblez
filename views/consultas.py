@@ -1023,6 +1023,213 @@ def view_consultas():
                             use_container_width=True,
                             type="primary"
                         )
+                        
+                        st.markdown("---")
+                        # 1. Gráfica de Pareto por Área vs Cantidad de Piezas
+                        import plotly.graph_objects as go
+                        
+                        friendly_area_names = {
+                            "Piezas por Diseñar": "Diseño",
+                            "Piezas por Cortar": "Corte",
+                            "Piezas por Rebabear": "Rebabeo",
+                            "Piezas por Doblar": "Doblez",
+                            "Piezas por Barrenar": "Barrenado",
+                            "Piezas por Pintar": "Pintura",
+                            "Piezas por Liberar": "Liberado",
+                            "Piezas por Empacar": "Empaque"
+                        }
+                        
+                        pareto_data = []
+                        for col, label in friendly_area_names.items():
+                            val = int(df_report[col].sum()) if col in df_report.columns else 0
+                            pareto_data.append({
+                                "Proceso": label,
+                                "Cantidad": val
+                            })
+                            
+                        df_pareto = pd.DataFrame(pareto_data)
+                        df_pareto = df_pareto.sort_values(by="Cantidad", ascending=False).reset_index(drop=True)
+                        
+                        total_wip = df_pareto["Cantidad"].sum()
+                        if total_wip > 0:
+                            df_pareto["Porcentaje Acumulado"] = (df_pareto["Cantidad"].cumsum() / total_wip * 100).round(1)
+                        else:
+                            df_pareto["Porcentaje Acumulado"] = 0.0
+                            
+                        fig_pareto = go.Figure()
+                        
+                        # Barras
+                        fig_pareto.add_trace(go.Bar(
+                            x=df_pareto["Proceso"],
+                            y=df_pareto["Cantidad"],
+                            name="Piezas en WIP",
+                            marker_color="#EC2024",
+                            text=df_pareto["Cantidad"],
+                            textposition='auto'
+                        ))
+                        
+                        # Línea acumulada
+                        if total_wip > 0:
+                            fig_pareto.add_trace(go.Scatter(
+                                x=df_pareto["Proceso"],
+                                y=df_pareto["Porcentaje Acumulado"],
+                                name="% Acumulado",
+                                yaxis="y2",
+                                mode="lines+markers",
+                                line=dict(color="#111111", width=3),
+                                marker=dict(size=8)
+                            ))
+                            
+                        fig_pareto.update_layout(
+                            title="<b>DIAGRAMA DE PARETO: WIP POR ÁREA / PROCESO</b>",
+                            title_x=0.5,
+                            xaxis=dict(title="Área / Proceso"),
+                            yaxis=dict(title="Cantidad de Piezas en WIP", side="left"),
+                            yaxis2=dict(
+                                title="Porcentaje Acumulado (%)",
+                                side="right",
+                                overlaying="y",
+                                range=[0, 110],
+                                showgrid=False
+                            ),
+                            legend=dict(x=0.8, y=0.9),
+                            margin=dict(t=50, b=30, l=40, r=40),
+                            height=350
+                        )
+                        st.plotly_chart(fig_pareto, use_container_width=True)
+                        
+                        st.markdown("---")
+                        # 2. Envío de Reporte por Correo (.eml)
+                        with st.expander("✉️ Compartir Reporte de Estatus de WIP por Correo (Outlook/Borrador)"):
+                            st.markdown("👇 **Descarga un archivo `.eml` (Borrador de Correo) con el estatus de WIP consolidado en HTML y el reporte Excel adjunto.**")
+                            
+                            # Consultar configuración persistente de correos
+                            from utils.database import get_config_correo
+                            config_correo = get_config_correo("wip_report", "produccion@sigrama.com", "corte.laser@sigrama.com")
+                            
+                            col_c1, col_c2 = st.columns(2)
+                            with col_c1:
+                                mail_to = st.text_input("Para:", value=config_correo["para"], key="wip_mail_to")
+                            with col_c2:
+                                mail_cc = st.text_input("CC (Copia):", value=config_correo["cc"], key="wip_mail_cc")
+                                
+                            import datetime
+                            today_str = datetime.date.today().strftime("%d/%m/%Y")
+                            default_subj = f"PLANTA METALES Estatus de WIP por SKU - {today_str} - SIGRAMA"
+                            mail_subject = st.text_input("Asunto:", value=default_subj, key="wip_mail_subject")
+                            
+                            # Generar tabla HTML de resumen de WIP
+                            html_rows = ""
+                            for idx, row in df_report.iterrows():
+                                html_rows += f"""
+                                <tr style="border-bottom: 1px solid #ddd;">
+                                    <td style="padding: 8px; text-align: left;">{row['SKU']}</td>
+                                    <td style="padding: 8px; text-align: center; font-weight: bold;">{row['Total']}</td>
+                                    <td style="padding: 8px; text-align: center;">{row['Piezas por Diseñar']}</td>
+                                    <td style="padding: 8px; text-align: center;">{row['Piezas por Cortar']}</td>
+                                    <td style="padding: 8px; text-align: center;">{row['Piezas por Rebabear']}</td>
+                                    <td style="padding: 8px; text-align: center;">{row['Piezas por Doblar']}</td>
+                                    <td style="padding: 8px; text-align: center;">{row['Piezas por Barrenar']}</td>
+                                    <td style="padding: 8px; text-align: center;">{row['Piezas por Pintar']}</td>
+                                    <td style="padding: 8px; text-align: center;">{row['Piezas por Liberar']}</td>
+                                    <td style="padding: 8px; text-align: center;">{row['Piezas por Empacar']}</td>
+                                </tr>
+                                """
+                                
+                            # Agregar fila de totales
+                            html_rows += f"""
+                            <tr style="background-color: #f1f3f5; font-weight: bold; border-top: 2px solid #333;">
+                                <td style="padding: 8px; text-align: left;">Total Consolidado</td>
+                                <td style="padding: 8px; text-align: center;">{subtotales['Total']}</td>
+                                <td style="padding: 8px; text-align: center;">{subtotales['Piezas por Diseñar']}</td>
+                                <td style="padding: 8px; text-align: center;">{subtotales['Piezas por Cortar']}</td>
+                                <td style="padding: 8px; text-align: center;">{subtotales['Piezas por Rebabear']}</td>
+                                <td style="padding: 8px; text-align: center;">{subtotales['Piezas por Doblar']}</td>
+                                <td style="padding: 8px; text-align: center;">{subtotales['Piezas por Barrenar']}</td>
+                                <td style="padding: 8px; text-align: center;">{subtotales['Piezas por Pintar']}</td>
+                                <td style="padding: 8px; text-align: center;">{subtotales['Piezas por Liberar']}</td>
+                                <td style="padding: 8px; text-align: center;">{subtotales['Piezas por Empacar']}</td>
+                            </tr>
+                            """
+                            
+                            html_body = f"""
+                            <html>
+                            <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+                                <div style="max-width: 800px; margin: 0 auto; border: 1px solid #e9ecef; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+                                    <div style="background-color: #EC2024; color: #ffffff; padding: 20px; text-align: center;">
+                                        <h2 style="margin: 0; font-size: 22px;">Reporte de Estatus de WIP por SKU</h2>
+                                        <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">Industria Sigrama - Control de Avances y WIP</p>
+                                    </div>
+                                    <div style="padding: 25px;">
+                                        <p>Estimado equipo,</p>
+                                        <p>Compartimos el estado del inventario en proceso (WIP) desglosado por número de parte (SKU) y estación de trabajo para las OFs seleccionadas.</p>
+                                        
+                                        <div style="margin: 20px 0; overflow-x: auto;">
+                                            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                                <thead>
+                                                    <tr style="background-color: #f8f9fa; border-bottom: 2px solid #ddd; font-weight: bold;">
+                                                        <th style="padding: 8px; text-align: left;">SKU</th>
+                                                        <th style="padding: 8px; text-align: center;">Total</th>
+                                                        <th style="padding: 8px; text-align: center;">Por Diseñar</th>
+                                                        <th style="padding: 8px; text-align: center;">Por Cortar</th>
+                                                        <th style="padding: 8px; text-align: center;">Por Rebabear</th>
+                                                        <th style="padding: 8px; text-align: center;">Por Doblar</th>
+                                                        <th style="padding: 8px; text-align: center;">Por Barrenar</th>
+                                                        <th style="padding: 8px; text-align: center;">Por Pintar</th>
+                                                        <th style="padding: 8px; text-align: center;">Por Liberar</th>
+                                                        <th style="padding: 8px; text-align: center;">Por Empacar</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {html_rows}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        
+                                        <p style="font-size: 13px; color: #666; background-color: #f8f9fa; padding: 15px; border-left: 4px solid #EC2024; border-radius: 4px; margin-top: 25px;">
+                                            <strong>Nota:</strong> Adjunto a este correo encontrará el archivo Excel <code>Reporte_Estatus_WIP_SKU.xlsx</code> con el desglose detallado de piezas en WIP.
+                                        </p>
+                                        
+                                        <p style="margin-top: 30px;">Atentamente,<br><strong>Supervisor de Producción</strong><br>Industria Sigrama</p>
+                                    </div>
+                                    <div style="background-color: #f1f3f5; color: #868e96; text-align: center; padding: 12px; font-size: 11px; border-top: 1px solid #e9ecef;">
+                                        Este es un reporte automático generado desde la aplicación de control de producción de SIGRAMA.
+                                    </div>
+                                </div>
+                            </body>
+                            </html>
+                            """
+                            
+                            from email.mime.multipart import MIMEMultipart
+                            from email.mime.text import MIMEText
+                            from email.mime.base import MIMEBase
+                            from email import encoders
+                            
+                            msg = MIMEMultipart('mixed')
+                            msg['To'] = mail_to
+                            msg['Cc'] = mail_cc
+                            msg['Subject'] = mail_subject
+                            msg['X-Unsent'] = '1'
+                            
+                            body_part = MIMEText(html_body, 'html', 'utf-8')
+                            msg.attach(body_part)
+                            
+                            # Adjuntar el archivo Excel
+                            part = MIMEBase('application', 'octet-stream')
+                            part.set_payload(excel_report_bytes)
+                            encoders.encode_base64(part)
+                            part.add_header('Content-Disposition', 'attachment; filename="Reporte_Estatus_WIP_SKU.xlsx"')
+                            msg.attach(part)
+                            
+                            eml_bytes = msg.as_bytes()
+                            
+                            st.download_button(
+                                label="✉️ Descargar Borrador de Correo (.eml)",
+                                data=eml_bytes,
+                                file_name="Reporte_Estatus_WIP_SKU.eml",
+                                mime="message/rfc822",
+                                use_container_width=True
+                            )
             except Exception as e:
                 st.error(f"❌ Error al procesar el archivo: {str(e)}")
 
