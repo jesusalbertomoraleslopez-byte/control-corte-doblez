@@ -1113,8 +1113,8 @@ def view_consultas():
                             with col_c2:
                                 mail_cc = st.text_input("CC (Copia):", value=config_correo["cc"], key="wip_mail_cc")
                                 
-                            import datetime
-                            today_str = datetime.date.today().strftime("%d/%m/%Y")
+                            import datetime as _dt
+                            today_str = _dt.date.today().strftime("%d/%m/%Y")
                             default_subj = f"PLANTA METALES Estatus de WIP por SKU - {today_str} - SIGRAMA"
                             mail_subject = st.text_input("Asunto:", value=default_subj, key="wip_mail_subject")
                             
