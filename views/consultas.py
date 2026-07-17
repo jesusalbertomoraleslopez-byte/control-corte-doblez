@@ -1048,7 +1048,7 @@ def view_consultas():
                             })
                             
                         df_pareto = pd.DataFrame(pareto_data)
-                        df_pareto = df_pareto.sort_values(by="Cantidad", ascending=False).reset_index(drop=True)
+                        # Mantener el orden fijo del flujo de proceso (igual que la tabla)
                         
                         total_wip = df_pareto["Cantidad"].sum()
                         if total_wip > 0:
