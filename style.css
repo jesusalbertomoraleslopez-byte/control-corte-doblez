@@ -89,10 +89,10 @@ header {visibility: hidden;}
    ============================================= */
 
 /* Kill white backgrounds on ALL button wrappers inside sidebar */
-[data-testid="stSidebar"] .stButton,
-[data-testid="stSidebar"] .stButton > div,
-[data-testid="stSidebar"] div[data-testid="stButtonContainer"],
-[data-testid="stSidebar"] div[data-testid="stButtonContainer"] > div {
+section[data-testid="stSidebar"] div[data-testid="stButton"],
+section[data-testid="stSidebar"] div[data-testid="stButton"] > div,
+section[data-testid="stSidebar"] div[data-testid="stButtonContainer"],
+section[data-testid="stSidebar"] div[data-testid="stButtonContainer"] > div {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
@@ -100,8 +100,9 @@ header {visibility: hidden;}
     margin: 0 0 1px 0 !important;
 }
 
-/* The actual button element */
-[data-testid="stSidebar"] .stButton > button {
+/* The actual button element inside the sidebar */
+section[data-testid="stSidebar"] button,
+[data-testid="stSidebar"] button {
     background-color: transparent !important;
     background: transparent !important;
     border: none !important;
@@ -122,16 +123,19 @@ header {visibility: hidden;}
     margin: 0 !important;
 }
 
-[data-testid="stSidebar"] .stButton > button:hover {
+section[data-testid="stSidebar"] button:hover,
+[data-testid="stSidebar"] button:hover {
     background-color: rgba(236, 32, 36, 0.18) !important;
     border-left: 3px solid #EC2024 !important;
     color: #ffffff !important;
     box-shadow: none !important;
 }
 
-[data-testid="stSidebar"] .stButton > button:focus,
-[data-testid="stSidebar"] .stButton > button:focus-visible,
-[data-testid="stSidebar"] .stButton > button:active {
+section[data-testid="stSidebar"] button:focus,
+section[data-testid="stSidebar"] button:focus-visible,
+section[data-testid="stSidebar"] button:active,
+[data-testid="stSidebar"] button:focus,
+[data-testid="stSidebar"] button:active {
     background-color: rgba(236, 32, 36, 0.22) !important;
     border-left: 3px solid #EC2024 !important;
     color: #ffffff !important;
