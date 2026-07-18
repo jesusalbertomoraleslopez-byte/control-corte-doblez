@@ -83,3 +83,57 @@ h1, h2, h3, h4, h5, h6 {
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
+
+/* =============================================
+   SIDEBAR NAVIGATION MENU — Premium Style
+   ============================================= */
+
+/* Override red global button style ONLY inside sidebar nav */
+[data-testid="stSidebar"] .stButton > button {
+    background-color: transparent !important;
+    border: none !important;
+    border-left: 3px solid transparent !important;
+    border-radius: 0 8px 8px 0 !important;
+    color: #bbbbbb !important;
+    text-align: left !important;
+    padding: 10px 14px !important;
+    font-family: 'Questrial', sans-serif !important;
+    font-size: 0.92rem !important;
+    font-weight: 400 !important;
+    letter-spacing: 0.3px;
+    transition: all 0.18s ease !important;
+    margin-bottom: 2px !important;
+}
+
+[data-testid="stSidebar"] .stButton > button:hover {
+    background-color: rgba(236, 32, 36, 0.15) !important;
+    border-left: 3px solid #EC2024 !important;
+    color: #ffffff !important;
+}
+
+[data-testid="stSidebar"] .stButton > button:focus {
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+/* Reduce gap between nav buttons */
+[data-testid="stSidebar"] .stButton {
+    margin-bottom: 0 !important;
+}
+
+/* Nav dividers */
+[data-testid="stSidebar"] hr {
+    border-top: 1px solid #2a2a2a !important;
+    margin: 5px 0 !important;
+}
+
+/* User badge */
+[data-testid="stSidebar"] .user-badge {
+    background: #1e1e1e;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.78rem;
+    color: #aaa;
+    margin-bottom: 10px;
+}
+

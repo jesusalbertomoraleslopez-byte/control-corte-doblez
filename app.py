@@ -104,25 +104,118 @@ def render_sidebar():
         """
         st.sidebar.markdown(logo_html, unsafe_allow_html=True)
         
-    st.sidebar.markdown(f"**Usuario:** {st.session_state.role}")
+    role_icon = "🛡️" if st.session_state.role == "Administrador" else "👷"
+    user_badge = f"""
+    <div style="background:#1e1e1e;border-radius:8px;padding:8px 12px;margin-bottom:12px;
+                border-left:3px solid #EC2024;font-family:'Questrial',sans-serif;">
+        <span style="font-size:0.65rem;color:#888;letter-spacing:2px;text-transform:uppercase;">
+            Usuario activo
+        </span><br>
+        <span style="font-size:0.95rem;color:#fff;font-weight:600;">
+            {role_icon} {st.session_state.role}
+        </span>
+    </div>
+    """
+    st.sidebar.markdown(user_badge, unsafe_allow_html=True)
     
-    menu = [
-        "1. DASHBOARD PRINCIPAL",
-        "1.2 DASHBOARD GLOBAL",
-        "2. CONSULTAS Y REPORTES",
-        "3. PLANEACIÓN",
-        "4. CONTROL DE PRODUCCIÓN",
-        "5. MANUFACTURA INTELIGENTE Y MANUAL",
-        "5.2 ENTARIMADO"
+    # --- Menú de Navegación Premium ---
+    # Inyectar CSS del menú una sola vez
+    st.sidebar.markdown("""
+    <style>
+    .nav-section-label {
+        font-size: 0.65rem;
+        color: #666;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        padding: 10px 4px 4px 4px;
+        margin: 0;
+        font-family: 'Questrial', sans-serif;
+    }
+    div[data-testid="stSidebarContent"] .stButton>button {
+        background: transparent;
+        border: none;
+        color: #ccc;
+        text-align: left;
+        width: 100%;
+        padding: 9px 12px;
+        border-radius: 8px;
+        font-size: 0.87rem;
+        font-family: 'Questrial', sans-serif;
+        cursor: pointer;
+        transition: background 0.2s, color 0.2s;
+        margin-bottom: 2px;
+    }
+    div[data-testid="stSidebarContent"] .stButton>button:hover {
+        background: rgba(236,32,36,0.15);
+        color: #fff;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Definición del menú con íconos y nombres mejorados
+    MENU_ITEMS = [
+        {"key": "dashboard",     "icon": "📈", "label": "Dashboard Principal",      "admin_only": False},
+        {"key": "global",        "icon": "🌐", "label": "Dashboard Global",          "admin_only": False},
+        None,  # separador
+        {"key": "consultas",     "icon": "📋", "label": "Consultas y Reportes",     "admin_only": False},
+        {"key": "planeacion",    "icon": "📅", "label": "Planeación de Corte",       "admin_only": False},
+        None,  # separador
+        {"key": "produccion",    "icon": "⚙️",  "label": "Control de Producción",   "admin_only": False},
+        {"key": "manufactura",   "icon": "🤖", "label": "Manufactura Inteligente",  "admin_only": False},
+        {"key": "entarimado",    "icon": "📦", "label": "Entarimado / Embarque",    "admin_only": False},
+        None,  # separador
+        {"key": "mantenimiento", "icon": "🔧", "label": "Mantenimiento",             "admin_only": True},
+        {"key": "sgc",           "icon": "📂", "label": "SGC / Documentos",          "admin_only": True},
     ]
-    
-    if st.session_state.role == "Administrador":
-        menu.extend([
-            "6. MANTENIMIENTO",
-            "7. SGC (Oculto - Solo Admin)"
-        ])
-        
-    choice = st.sidebar.radio("Navegación", menu)
+
+    is_admin = st.session_state.role == "Administrador"
+
+    # Inicializar selección activa
+    if "nav_choice" not in st.session_state:
+        st.session_state.nav_choice = "dashboard"
+
+    current = st.session_state.nav_choice
+
+    sep_count = 0
+    for item in MENU_ITEMS:
+        if item is None:
+            sep_count += 1
+            st.sidebar.markdown('<hr style="border:none;border-top:1px solid #333;margin:6px 0;">', unsafe_allow_html=True)
+            continue
+        if item["admin_only"] and not is_admin:
+            continue
+        is_active = current == item["key"]
+        label_html = f"""
+        <div style="
+            background: {'rgba(236,32,36,0.2)' if is_active else 'transparent'};
+            border-left: {'3px solid #EC2024' if is_active else '3px solid transparent'};
+            color: {'#ffffff' if is_active else '#bbbbbb'};
+            padding: 9px 12px;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.9rem;
+            font-family: 'Questrial', sans-serif;
+            margin-bottom: 2px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        ">
+            <span style="font-size:1.1rem">{item['icon']}</span>
+            <span style="{'font-weight:700' if is_active else ''}">{item['label']}</span>
+        </div>
+        """
+        # Render como botón Streamlit para capturar clics
+        btn_key = f"nav_btn_{item['key']}"
+        if st.sidebar.button(
+            f"{item['icon']}  {item['label']}",
+            key=btn_key,
+            use_container_width=True,
+            help=item['label']
+        ):
+            st.session_state.nav_choice = item["key"]
+            st.rerun()
+
+    choice = st.session_state.nav_choice
     
     # Determinar la OF Activa en segundo plano
     from utils.database import get_all_ofs, get_active_of
@@ -299,23 +392,23 @@ def main():
 """
             st.markdown(banner_html, unsafe_allow_html=True)
         
-        if choice == "1. DASHBOARD PRINCIPAL":
+        if choice == "dashboard":
             view_dashboard()
-        elif choice == "1.2 DASHBOARD GLOBAL":
+        elif choice == "global":
             view_dashboard_global()
-        elif choice == "2. CONSULTAS Y REPORTES":
+        elif choice == "consultas":
             view_consultas()
-        elif choice == "3. PLANEACIÓN":
+        elif choice == "planeacion":
             view_planeacion()
-        elif choice == "4. CONTROL DE PRODUCCIÓN":
+        elif choice == "produccion":
             view_produccion()
-        elif choice == "5. MANUFACTURA INTELIGENTE Y MANUAL":
+        elif choice == "manufactura":
             view_manufactura()
-        elif choice == "5.2 ENTARIMADO":
+        elif choice == "entarimado":
             view_entarimado()
-        elif choice == "6. MANTENIMIENTO":
+        elif choice == "mantenimiento":
             view_mantenimiento()
-        elif choice == "7. SGC (Oculto - Solo Admin)":
+        elif choice == "sgc":
             view_sgc()
 
 if __name__ == "__main__":
