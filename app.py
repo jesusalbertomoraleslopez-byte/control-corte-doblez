@@ -15,11 +15,18 @@ st.set_page_config(
 init_db()
 
 # --- Inyección de CSS ---
-def inject_css():
+@st.cache_data(show_spinner=False)
+def _read_css():
     css_file = "style.css"
     if os.path.exists(css_file):
         with open(css_file) as f:
-            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+            return f.read()
+    return ""
+
+def inject_css():
+    css = _read_css()
+    if css:
+        st.markdown(f'<style>{css}</style>', unsafe_allow_html=True)
             
 inject_css()
 
@@ -56,14 +63,16 @@ def logout():
     st.session_state.role = None
     st.rerun()
 
+@st.cache_data(ttl=30, show_spinner=False)
 def get_sidebar_stats():
+    """Cached sidebar KPIs — refreshed every 30 seconds."""
     try:
         from utils.database import get_connection
         from views.reportes import calculate_global_wip
         conn = get_connection()
         df_avances = pd.read_sql_query("SELECT area, SUM(cantidad) as cantidad FROM avances GROUP BY area", conn)
-        wip_data = calculate_global_wip("Todas")
         conn.close()
+        wip_data = calculate_global_wip("Todas")
         av_dict = df_avances.set_index('area')['cantidad'].to_dict() if not df_avances.empty else {}
         return av_dict, wip_data
     except Exception:

@@ -4,6 +4,7 @@ import datetime
 import subprocess
 import threading
 import os
+import streamlit as st
 
 EXCEL_DB_PATH = "sigrama_database.xlsx"
 TEMP_DB_PATH = "sigrama_temp.db"
@@ -798,11 +799,11 @@ def get_dashboard_stats(of_list=None):
     conn.close()
     return stats
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_personal_prenomina():
-    """Carga la lista de personal de la prenomina desde local o GitHub raw url."""
+    """Carga la lista de personal de la prenomina desde local o GitHub raw url. Cache TTL: 1 hora."""
     import os
     import pandas as pd
-    import streamlit as st
     url_github = "https://raw.githubusercontent.com/jesusalbertomoraleslopez-byte/sigrama-prenomina-app/main/personal.xlsx"
     local_path = "../sigrama-prenomina-app/personal.xlsx"
     try:

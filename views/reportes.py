@@ -14,6 +14,7 @@ def get_area_anterior(ruta_str, current_area):
     return None
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def calculate_global_wip(of_number):
     df_todas = get_todas_piezas(of_number)
     if df_todas.empty:
@@ -807,16 +808,13 @@ def view_reportes():
                     
             return output.getvalue()
 
-        excel_data = get_excel_report(of_list)
-        wip_excel_data = get_wip_consolidado_excel(of_list)
-        
         file_sufix = "Multiples" if len(of_list) != 1 or "Todas" in of_list else of_list[0]
         
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
             st.download_button(
                 label="📊 Descargar Reporte de Transacciones (Excel)",
-                data=excel_data,
+                data=lambda: get_excel_report(of_list),
                 file_name=f"Reporte_Transacciones_OF_{file_sufix}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
@@ -824,7 +822,7 @@ def view_reportes():
         with col_dl2:
             st.download_button(
                 label="📥 Descargar Reporte Detallado de WIP por Área (Excel)",
-                data=wip_excel_data,
+                data=lambda: get_wip_consolidado_excel(of_list),
                 file_name=f"Reporte_Detallado_WIP_Areas_{file_sufix}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary",
