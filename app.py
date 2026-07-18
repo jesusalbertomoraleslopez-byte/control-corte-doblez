@@ -15,7 +15,6 @@ st.set_page_config(
 init_db()
 
 # --- Inyección de CSS ---
-@st.cache_data(show_spinner=False)
 def _read_css():
     css_file = "style.css"
     if os.path.exists(css_file):
