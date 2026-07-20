@@ -963,17 +963,23 @@ def view_consultas():
                 conn = get_connection()
                 if "Todas" in sel_ofs:
                     df_req_sku = pd.read_sql_query("""
-                        SELECT p.of_number, p.nido, p.cantidad, n.hojas, p.ruta, p.nombre_pieza
+                        SELECT p.of_number, p.nido, p.cantidad, n.hojas, p.ruta, p.nombre_pieza,
+                               COALESCE(o.proyecto_cliente, o.proyecto, '') as proyecto,
+                               COALESCE(o.prioridad, '') as prioridad
                         FROM piezas p
                         JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+                        LEFT JOIN ordenes o ON p.of_number = o.of_number
                         WHERE p.no_pieza = ?
                     """, conn, params=(sku_buscar,))
                 else:
                     placeholders = ",".join(["?"] * len(sel_ofs))
                     df_req_sku = pd.read_sql_query(f"""
-                        SELECT p.of_number, p.nido, p.cantidad, n.hojas, p.ruta, p.nombre_pieza
+                        SELECT p.of_number, p.nido, p.cantidad, n.hojas, p.ruta, p.nombre_pieza,
+                               COALESCE(o.proyecto_cliente, o.proyecto, '') as proyecto,
+                               COALESCE(o.prioridad, '') as prioridad
                         FROM piezas p
                         JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+                        LEFT JOIN ordenes o ON p.of_number = o.of_number
                         WHERE p.no_pieza = ? AND p.of_number IN ({placeholders})
                     """, conn, params=tuple([sku_buscar] + list(sel_ofs)))
                 conn.close()
@@ -1065,9 +1071,11 @@ def view_consultas():
                         st.info("Este SKU no se encuentra programado en ninguna OF activa bajo los filtros seleccionados.")
                     else:
                         st.dataframe(
-                            df_req_sku[["of_number", "nido", "cantidad", "hojas", "total_requeridas", "ruta"]].rename(columns={
+                            df_req_sku[["of_number", "nido", "proyecto", "prioridad", "cantidad", "hojas", "total_requeridas", "ruta"]].rename(columns={
                                 "of_number": "OF",
                                 "nido": "Nido",
+                                "proyecto": "Proyecto",
+                                "prioridad": "Parcialidad / Prioridad",
                                 "cantidad": "Piezas por Nido",
                                 "hojas": "Hojas Programadas",
                                 "total_requeridas": "Total Piezas",
