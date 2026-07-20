@@ -308,10 +308,8 @@ def view_dashboard():
     active_of = get_active_of()
 
     # ── Top Filters ──────────────────────────────────────────────
-    from utils.database import get_connection
-    conn = get_connection()
-    df_ofs = pd.read_sql_query("SELECT of_number, proyecto FROM ordenes", conn)
-    conn.close()
+    from utils.database import get_ofs_proyectos
+    df_ofs = get_ofs_proyectos()
     
     if df_ofs.empty:
         st.warning("⚠️ No hay Órdenes de Fabricación registradas en el sistema.")

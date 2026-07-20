@@ -142,13 +142,18 @@ def view_planeacion():
     # ══════════════════════════════════════════════════════════
     # SUB SECCIONES (TABS)
     # ══════════════════════════════════════════════════════════
-    tab_carga, tab_rutas, tab_gantt = st.tabs([
-        "📤 3.1 CARGA", 
-        "🛣️ 3.2 SELECCIÓN DE PROCESOS",
-        "📅 3.3 PROGRAMACIÓN Y GANTT"
-    ])
+    active_tab = st.radio(
+        "Seleccionar Sub-Sección:",
+        [
+            "📤 3.1 CARGA", 
+            "🛣️ 3.2 SELECCIÓN DE PROCESOS",
+            "📅 3.3 PROGRAMACIÓN Y GANTT"
+        ],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
 
-    with tab_gantt:
+    if active_tab == "📅 3.3 PROGRAMACIÓN Y GANTT":
         st.markdown("### 📅 3.3 Programación y Diagrama de Gantt (Corte Láser)")
         st.markdown("👇 **Asigna las fechas de inicio, duraciones y estados para cada Orden de Fabricación (OF).**")
         
@@ -673,7 +678,7 @@ def view_planeacion():
             else:
                 st.info("💡 Asigna fechas de inicio y duraciones en la tabla superior para dibujar el diagrama Gantt.")
 
-    with tab_carga:
+    elif active_tab == "📤 3.1 CARGA":
         st.markdown("### 📋 Paso 1: Cargar Plan de Producción")
 
         col_dl, col_info = st.columns([1, 2])
@@ -915,7 +920,7 @@ def view_planeacion():
                 else:
                     st.warning("No se pudo calcular Totales.")
 
-    with tab_rutas:
+    elif active_tab == "🛣️ 3.2 SELECCIÓN DE PROCESOS":
         st.markdown("### 🛣️ Paso 2: Selección Dinámica de Procesos (Rutas)")
         from utils.database import get_all_ofs
         all_ofs_list = get_all_ofs()

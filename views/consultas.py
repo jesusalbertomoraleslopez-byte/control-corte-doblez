@@ -267,18 +267,23 @@ def generate_sku_wip_report_excel(df_report):
 def view_consultas():
     st.title("2. CONSULTAS Y REPORTES")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📅 Avance del Día", 
-        "📊 Avance Semanal", 
-        "🔍 Trazabilidad", 
-        "📉 Calidad (Rechazos)",
-        "📦 Material Programado",
-        "🏭 WIP en Piso (Reportes)",
-        "📋 WIP por SKU / Req"
-    ])
+    active_tab = st.radio(
+        "Seleccionar Pestaña:",
+        [
+            "📅 Avance del Día", 
+            "📊 Avance Semanal", 
+            "🔍 Trazabilidad", 
+            "📉 Calidad (Rechazos)",
+            "📦 Material Programado",
+            "🏭 WIP en Piso (Reportes)",
+            "📋 WIP por SKU / Req"
+        ],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
 
     # --- PESTAÑA 1: Avance del Día ---
-    with tab1:
+    if active_tab == "📅 Avance del Día":
         st.subheader("Reporte Diario de Avances PLANTA METALES")
         selected_date = st.date_input("Selecciona el día a consultar:", datetime.today())
         
@@ -369,7 +374,7 @@ def view_consultas():
             )
 
     # --- PESTAÑA 2: Avance Semanal ---
-    with tab2:
+    elif active_tab == "📊 Avance Semanal":
         st.subheader("Tendencia Semanal por Área (Últimos 7 días)")
         
         # Fecha hace 7 dias
@@ -406,7 +411,7 @@ def view_consultas():
                 st.plotly_chart(fig, use_container_width=True)
 
     # --- PESTAÑA 3: Trazabilidad ---
-    with tab3:
+    elif active_tab == "🔍 Trazabilidad":
         st.subheader("Buscador y Trazabilidad General")
         
         col1, col2, col3 = st.columns(3)
@@ -452,7 +457,7 @@ def view_consultas():
         )
 
     # --- PESTAÑA 4: Calidad ---
-    with tab4:
+    elif active_tab == "📉 Calidad (Rechazos)":
         st.subheader("Análisis de Scrap y Rechazos")
         
         query_calidad = """
@@ -582,7 +587,7 @@ def view_consultas():
             )
 
     # --- PESTAÑA 5: Material Programado ---
-    with tab5:
+    elif active_tab == "📦 Material Programado":
         st.subheader("📦 Material Programado por Orden de Fabricación")
         st.markdown("Consulta exactamente qué piezas y qué cantidades están planificadas en cada OF, nido y proceso.")
 
@@ -906,11 +911,11 @@ def view_consultas():
                 st.plotly_chart(fig_top, use_container_width=True)
 
     # --- PESTAÑA 6: WIP en Piso (Reportes) ---
-    with tab6:
+    elif active_tab == "🏭 WIP en Piso (Reportes)":
         view_reportes()
 
     # --- PESTAÑA 7: WIP por SKU / Req ---
-    with tab7:
+    elif active_tab == "📋 WIP por SKU / Req":
         st.subheader("📋 Reporte de WIP por SKU / Requerimiento")
         st.markdown(
             "Este reporte te permite subir una lista de piezas (SKUs) y cantidades requeridas "

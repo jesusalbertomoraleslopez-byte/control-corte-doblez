@@ -435,8 +435,9 @@ def get_active_of():
         return res
     return None
 
+@st.cache_data(ttl=60, show_spinner=False)
 def get_all_ofs():
-    """Devuelve una lista de todos los números de OF disponibles."""
+    """Devuelve una lista de todos los números de OF disponibles. Cache: 60s."""
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT of_number FROM ordenes ORDER BY fecha_carga DESC")
@@ -682,7 +683,19 @@ def get_movimientos_area(of_number, area):
     conn.close()
     return df
 
+@st.cache_data(ttl=60, show_spinner=False)
+def get_ofs_proyectos():
+    """Devuelve un dataframe con las OFs y sus proyectos correspondientes. Cache: 60s."""
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT of_number, proyecto FROM ordenes", conn)
+    conn.close()
+    return df
+
+@st.cache_data(ttl=30, show_spinner=False)
 def get_dashboard_stats(of_list=None):
+    if isinstance(of_list, list):
+        of_list = tuple(of_list)
+        
     conn = get_connection()
     c = conn.cursor()
     
