@@ -137,13 +137,58 @@ def view_dashboard_global():
         fig2.update_layout(title_text="<b>PRODUCTIVIDAD POR HORARIO</b>", title_x=0.5, margin=dict(t=40, b=10, l=10, r=10), height=250, showlegend=False)
         colB.plotly_chart(fig2, use_container_width=True)
     
-    # 3. Tendencia Diaria
+    # 3. Tendencia Diaria por Área
     if not df_avances.empty:
         df_avances['Fecha'] = pd.to_datetime(df_avances['timestamp']).dt.date
-        tendencia = df_avances.groupby('Fecha')['cantidad'].sum().reset_index()
-        fig3 = px.line(tendencia, x='Fecha', y='cantidad', markers=True, line_shape='spline')
-        fig3.update_traces(line_color="#EC2024", marker=dict(size=8, color="#111111"))
-        fig3.update_layout(title_text="<b>TENDENCIA DE PRODUCCIÓN DIARIA (Pzs)</b>", title_x=0.5, margin=dict(t=40, b=10, l=10, r=10), height=250)
+        df_avances['Área'] = df_avances['area'].replace({
+            "Ingenieria": "Ingeniería",
+            "Corte": "Corte",
+            "Rebabeo": "Rebabeo",
+            "Doblez": "Doblez",
+            "Barrenado": "Barrenado",
+            "Pintura": "Pintura",
+            "Liberado": "Liberado",
+            "Empaque": "Empaque"
+        })
+        
+        # Agrupar por fecha y área para separar las líneas
+        tendencia = df_avances.groupby(['Fecha', 'Área'])['cantidad'].sum().reset_index()
+        
+        color_map = {
+            "Ingeniería": "#FFD700",  # Gold
+            "Corte": "#00BFFF",        # Deep Sky Blue
+            "Rebabeo": "#FF6347",      # Tomato
+            "Doblez": "#DC143C",       # Crimson
+            "Barrenado": "#FF8C00",    # Dark Orange
+            "Pintura": "#9370DB",      # Medium Purple
+            "Liberado": "#D2B48C",     # Tan
+            "Empaque": "#32CD32"       # Lime Green
+        }
+        
+        fig3 = px.line(
+            tendencia, 
+            x='Fecha', 
+            y='cantidad', 
+            color='Área', 
+            markers=True, 
+            line_shape='spline',
+            color_discrete_map=color_map
+        )
+        fig3.update_traces(marker=dict(size=6))
+        fig3.update_layout(
+            title_text="<b>TENDENCIA DIARIA POR ÁREA (Pzs)</b>", 
+            title_x=0.5, 
+            margin=dict(t=40, b=10, l=10, r=10), 
+            height=250,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=-0.4,
+                xanchor="center",
+                x=0.5,
+                title=None
+            )
+        )
         colC.plotly_chart(fig3, use_container_width=True)
 
     st.markdown("---")
