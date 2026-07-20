@@ -916,7 +916,194 @@ def view_consultas():
 
     # --- PESTAÑA 7: WIP por SKU / Req ---
     elif active_tab == "📋 WIP por SKU / Req":
-        st.subheader("📋 Reporte de WIP por SKU / Requerimiento")
+        st.subheader("📋 Reporte y Consulta de WIP por SKU")
+        
+        # Ofrecer dos modos de consulta: Individual vs Carga Masiva
+        modo_consulta = st.radio(
+            "Selecciona el modo de consulta:",
+            ["🔍 Buscar un Número de Parte (SKU) en específico", "📂 Carga Masiva de Requerimiento (Excel/CSV)"],
+            horizontal=True,
+            key="wip_modo_consulta_radio",
+            label_visibility="collapsed"
+        )
+        
+        if modo_consulta == "🔍 Buscar un Número de Parte (SKU) en específico":
+            from utils.database import get_connection, get_all_ofs
+            
+            # Obtener lista completa de SKUs únicos de piezas y avances
+            conn = get_connection()
+            df_skus_piezas = pd.read_sql_query("SELECT DISTINCT no_pieza FROM piezas WHERE no_pieza IS NOT NULL AND no_pieza != ''", conn)
+            df_skus_avances = pd.read_sql_query("SELECT DISTINCT no_pieza FROM avances WHERE no_pieza IS NOT NULL AND no_pieza != ''", conn)
+            conn.close()
+            
+            all_skus = sorted(list(set(
+                df_skus_piezas["no_pieza"].str.strip().tolist() + 
+                df_skus_avances["no_pieza"].str.strip().tolist()
+            )))
+            
+            col_search_sku, col_search_ofs = st.columns([2, 1])
+            with col_search_sku:
+                sku_buscar = st.selectbox(
+                    "🔍 Selecciona o escribe el Número de Parte (SKU) a buscar:",
+                    options=all_skus,
+                    index=0 if all_skus else None,
+                    key="single_sku_search_box"
+                )
+            with col_search_ofs:
+                all_ofs = get_all_ofs()
+                sel_ofs = st.multiselect(
+                    "Filtrar por OFs:",
+                    ["Todas"] + all_ofs,
+                    default=["Todas"],
+                    key="single_sku_search_ofs"
+                )
+                
+            if sku_buscar:
+                # 1. Obtener la demanda programada para este SKU en las OFs seleccionadas
+                conn = get_connection()
+                if "Todas" in sel_ofs:
+                    df_req_sku = pd.read_sql_query("""
+                        SELECT p.of_number, p.nido, p.cantidad, n.hojas, p.ruta, p.nombre_pieza
+                        FROM piezas p
+                        JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+                        WHERE p.no_pieza = ?
+                    """, conn, params=(sku_buscar,))
+                else:
+                    placeholders = ",".join(["?"] * len(sel_ofs))
+                    df_req_sku = pd.read_sql_query(f"""
+                        SELECT p.of_number, p.nido, p.cantidad, n.hojas, p.ruta, p.nombre_pieza
+                        FROM piezas p
+                        JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+                        WHERE p.no_pieza = ? AND p.of_number IN ({placeholders})
+                    """, conn, params=tuple([sku_buscar] + list(sel_ofs)))
+                conn.close()
+                
+                # Nombre/descripción de la pieza
+                descripcion_pieza = ""
+                if not df_req_sku.empty:
+                    df_req_sku["total_requeridas"] = pd.to_numeric(df_req_sku["cantidad"], errors="coerce").fillna(0) * pd.to_numeric(df_req_sku["hojas"], errors="coerce").fillna(1)
+                    total_req_val = int(df_req_sku["total_requeridas"].sum())
+                    non_null_desc = df_req_sku["nombre_pieza"].dropna().str.strip()
+                    if not non_null_desc.empty:
+                        descripcion_pieza = non_null_desc.iloc[0]
+                else:
+                    total_req_val = 0
+                    
+                # 2. Calcular WIP usando la misma función estándar para asegurar consistencia
+                df_single_uploaded = pd.DataFrame([{"SKU": sku_buscar, "Total": total_req_val}])
+                df_report = calculate_sku_wip_report(df_single_uploaded, sel_ofs)
+                
+                # Visualización
+                if not df_report.empty:
+                    row_rep = df_report.iloc[0]
+                    
+                    st.markdown(f"### 🔩 Estatus del SKU: `{sku_buscar}`")
+                    if descripcion_pieza:
+                        st.markdown(f"**Descripción:** *{descripcion_pieza}*")
+                        
+                    # Métricas de WIP en un grid moderno
+                    st.markdown("##### 🏭 Resumen General de Producción")
+                    
+                    # Calcular completadas (Terminadas)
+                    # Es el Total programado menos la suma del WIP activo
+                    wip_activo = (
+                        int(row_rep.get("Piezas por Diseñar", 0)) +
+                        int(row_rep.get("Piezas por Cortar", 0)) +
+                        int(row_rep.get("Piezas por Rebabear", 0)) +
+                        int(row_rep.get("Piezas por Doblar", 0)) +
+                        int(row_rep.get("Piezas por Barrenar", 0)) +
+                        int(row_rep.get("Piezas por Pintar", 0)) +
+                        int(row_rep.get("Piezas por Liberar", 0)) +
+                        int(row_rep.get("Piezas por Empacar", 0))
+                    )
+                    piezas_completadas = max(0, total_req_val - wip_activo)
+                    
+                    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+                    with m_col1:
+                        st.metric("Total Programado", f"{total_req_val} pzas")
+                    with m_col2:
+                        st.metric("En Proceso (WIP)", f"{wip_activo} pzas", delta=f"{wip_activo} activas" if wip_activo > 0 else None, delta_color="inverse")
+                    with m_col3:
+                        st.metric("Completadas", f"{piezas_completadas} pzas", delta=f"{piezas_completadas} terminadas" if piezas_completadas > 0 else None)
+                    with m_col4:
+                        porcentaje = (piezas_completadas / total_req_val * 100) if total_req_val > 0 else 0
+                        st.metric("Avance Total", f"{porcentaje:.1f}%")
+                        
+                    # Grid detallado por estación
+                    st.markdown("---")
+                    st.markdown("##### 📍 Inventario en Proceso (WIP) por Estación:")
+                    
+                    # Vamos a mostrar columnas tipo Pipeline de Producción
+                    pipeline_cols = st.columns(8)
+                    areas_pipeline = [
+                        ("Diseño", "Piezas por Diseñar", "🎨"),
+                        ("Corte", "Piezas por Cortar", "🔥"),
+                        ("Rebabeo", "Piezas por Rebabear", "✨"),
+                        ("Doblez", "Piezas por Doblar", "📐"),
+                        ("Barrenado", "Piezas por Barrenar", "⚙️"),
+                        ("Pintura", "Piezas por Pintar", "🖌️"),
+                        ("Liberado", "Piezas por Liberar", "🔎"),
+                        ("Empaque", "Piezas por Empacar", "📦")
+                    ]
+                    
+                    for idx_pipe, (nombre_area, col_rep, emoji) in enumerate(areas_pipeline):
+                        val_wip = int(row_rep.get(col_rep, 0))
+                        with pipeline_cols[idx_pipe]:
+                            st.markdown(
+                                f"<div style='text-align: center; border: 1px solid #ddd; border-radius: 8px; padding: 10px; background-color: #fcfcfc;'>"
+                                f"<div style='font-size: 24px;'>{emoji}</div>"
+                                f"<div style='font-weight: bold; font-size: 14px; color: #111;'>{nombre_area}</div>"
+                                f"<div style='font-size: 20px; font-weight: bold; color: {'#EC2024' if val_wip > 0 else '#32CD32'}; margin-top: 5px;'>{val_wip}</div>"
+                                f"</div>",
+                                unsafe_allow_html=True
+                            )
+                            
+                    # 3. Ubicación física en órdenes de fabricación y nidos
+                    st.markdown("---")
+                    st.markdown("##### 📂 Órdenes de Fabricación y Nidos Programados")
+                    if df_req_sku.empty:
+                        st.info("Este SKU no se encuentra programado en ninguna OF activa bajo los filtros seleccionados.")
+                    else:
+                        st.dataframe(
+                            df_req_sku[["of_number", "nido", "cantidad", "hojas", "total_requeridas", "ruta"]].rename(columns={
+                                "of_number": "OF",
+                                "nido": "Nido",
+                                "cantidad": "Piezas por Nido",
+                                "hojas": "Hojas Programadas",
+                                "total_requeridas": "Total Piezas",
+                                "ruta": "Ruta de Producción"
+                            }),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                        
+                    # 4. Historial de Avances Físicos de este SKU
+                    st.markdown("---")
+                    st.markdown("##### 📝 Historial de Avances Registrados")
+                    conn = get_connection()
+                    if "Todas" in sel_ofs:
+                        df_hist_sku = pd.read_sql_query("""
+                            SELECT timestamp as Fecha_Hora, of_number as OF, nido as Nido, area as Área, cantidad as Cantidad, operador as Operador, maquina as Máquina
+                            FROM avances
+                            WHERE no_pieza = ?
+                            ORDER BY timestamp DESC
+                        """, conn, params=(sku_buscar,))
+                    else:
+                        placeholders = ",".join(["?"] * len(sel_ofs))
+                        df_hist_sku = pd.read_sql_query(f"""
+                            SELECT timestamp as Fecha_Hora, of_number as OF, nido as Nido, area as Área, cantidad as Cantidad, operador as Operador, maquina as Máquina
+                            FROM avances
+                            WHERE no_pieza = ? AND of_number IN ({placeholders})
+                            ORDER BY timestamp DESC
+                        """, conn, params=tuple([sku_buscar] + list(sel_ofs)))
+                    conn.close()
+                    
+                    if df_hist_sku.empty:
+                        st.info("No se han registrado avances físicos para este SKU aún.")
+                    else:
+                        st.dataframe(df_hist_sku, use_container_width=True, hide_index=True)
+            return
+            
         st.markdown(
             "Este reporte te permite subir una lista de piezas (SKUs) y cantidades requeridas "
             "para comparar su avance actual y ubicar físicamente el WIP en las distintas estaciones de la planta."
