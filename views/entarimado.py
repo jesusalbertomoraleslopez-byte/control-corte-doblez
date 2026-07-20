@@ -5,16 +5,23 @@ from utils.database import get_connection, save_db_to_excel, sync_and_push_db
 
 def get_inventario_pt():
     conn = get_connection()
-    # 1. Obtener avances acumulados en Empaque
+    # 1. Obtener avances acumulados en EMPAQUE y en LIBERADO por pieza
+    #    Se usa el MAYOR de los dos para cubrir piezas que pasaron calidad
+    #    pero no tienen registro explícito de Empaque (ruta sin Empaque o avance faltante).
     df_avances = pd.read_sql_query("""
-        SELECT a.of_number, a.no_pieza, p.descripcion, SUM(a.cantidad) as total_avances
+        SELECT 
+            a.of_number,
+            a.no_pieza,
+            p.descripcion,
+            COALESCE(SUM(CASE WHEN a.area = 'Empaque' THEN a.cantidad ELSE 0 END), 0)  as total_empaque,
+            COALESCE(SUM(CASE WHEN a.area = 'Liberado' THEN a.cantidad ELSE 0 END), 0) as total_liberado
         FROM avances a
         LEFT JOIN (
             SELECT of_number, no_pieza, MIN(nombre_pieza) as descripcion
             FROM piezas
             GROUP BY of_number, no_pieza
         ) p ON a.of_number = p.of_number AND a.no_pieza = p.no_pieza
-        WHERE a.area = 'Empaque'
+        WHERE a.area IN ('Empaque', 'Liberado')
         GROUP BY a.of_number, a.no_pieza
     """, conn)
     
@@ -35,8 +42,15 @@ def get_inventario_pt():
     if df_avances.empty:
         return pd.DataFrame(columns=[
             "OF", "Producto/SKU", "Descripción", "PO", "Proyecto", 
-            "Proyecto Cliente", "Total Avanzado en PT", "Total Entarimado", "Disponible en PT"
+            "Proyecto Cliente", "Total Avanzado en PT", "Total Entarimado", "Disponible en PT",
+            "Fuente PT"
         ])
+    
+    # Usar el mayor de (Empaque, Liberado) como referencia de piezas en PT
+    df_avances["total_avances"] = df_avances[["total_empaque", "total_liberado"]].max(axis=1).astype(int)
+    df_avances["Fuente PT"] = df_avances.apply(
+        lambda r: "Empaque" if r["total_empaque"] >= r["total_liberado"] else "Liberado", axis=1
+    )
         
     df_inv = df_avances.merge(df_tarimas, on=["of_number", "no_pieza"], how="left")
     df_inv["total_empaquetado"] = df_inv["total_empaquetado"].fillna(0).astype(int)
@@ -58,9 +72,10 @@ def get_inventario_pt():
     
     df_inv = df_inv[[
         "OF", "Producto/SKU", "Descripción", "PO", "Proyecto", "Proyecto Cliente", 
-        "Total Avanzado en PT", "Total Entarimado", "Disponible en PT"
+        "Total Avanzado en PT", "Total Entarimado", "Disponible en PT", "Fuente PT"
     ]]
     return df_inv
+
 
 def get_next_bulto_name():
     conn = get_connection()
