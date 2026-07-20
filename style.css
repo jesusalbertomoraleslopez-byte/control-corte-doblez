@@ -97,47 +97,47 @@ section[data-testid="stSidebar"] div[data-testid="stButtonContainer"] > div {
     border: none !important;
     box-shadow: none !important;
     padding: 0 !important;
-    margin: 0 0 2px 0 !important;
-}
-
-/* Base button override for ALL buttons inside sidebar */
-section[data-testid="stSidebar"] button {
-    text-align: left !important;
-    justify-content: flex-start !important;
-    width: 100% !important;
-    padding: 12px 16px !important;
-    font-family: 'Questrial', sans-serif !important;
-    letter-spacing: 0.3px !important;
-    line-height: 1.4 !important;
-    transition: all 0.2s ease-in-out !important;
-    box-shadow: none !important;
     margin: 0 !important;
-    height: auto !important;
 }
 
-/* Secondary (Inactive) Buttons */
-section[data-testid="stSidebar"] button[data-testid="baseButton-secondary"],
-section[data-testid="stSidebar"] button:not([data-testid="baseButton-primary"]) {
+/* Reduce default spacing and vertical gap between all sidebar elements */
+[data-testid="stSidebarUserContent"] div[data-testid="stVerticalBlock"] {
+    gap: 0.35rem !important;
+}
+
+/* Base button styling for ALL buttons inside the sidebar (Default to Inactive state) */
+section[data-testid="stSidebar"] button {
     background-color: transparent !important;
     background: transparent !important;
     border: none !important;
     border-left: 4px solid transparent !important;
     border-radius: 0 8px 8px 0 !important;
-    color: #b5b5b5 !important;
-    font-size: 1.05rem !important;
-    font-weight: 500 !important;
+    color: #e0e0e0 !important; /* Brighter grey for high readability */
+    text-align: left !important;
+    justify-content: flex-start !important;
+    width: 100% !important;
+    padding: 10px 14px !important;
+    font-family: 'Questrial', sans-serif !important;
+    font-size: 1.12rem !important; /* Larger text as requested */
+    font-weight: 600 !important;   /* Bold/heavy text for visibility */
+    letter-spacing: 0.3px !important;
+    line-height: 1.3 !important;
+    transition: all 0.15s ease-in-out !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    height: auto !important;
 }
 
-/* Secondary (Inactive) Hover State */
-section[data-testid="stSidebar"] button[data-testid="baseButton-secondary"]:hover,
-section[data-testid="stSidebar"] button:not([data-testid="baseButton-primary"]):hover {
+/* Hover state for Inactive buttons */
+section[data-testid="stSidebar"] button:hover {
     background-color: rgba(236, 32, 36, 0.12) !important;
     border-left: 4px solid rgba(236, 32, 36, 0.6) !important;
     color: #ffffff !important;
     box-shadow: none !important;
 }
 
-/* Primary (Active) Buttons */
+/* Primary (Active) Button styles - overrides the transparent base styles */
+section[data-testid="stSidebar"] button[kind="primary"],
 section[data-testid="stSidebar"] button[data-testid="baseButton-primary"] {
     background-color: #EC2024 !important;
     background: #EC2024 !important;
@@ -145,21 +145,21 @@ section[data-testid="stSidebar"] button[data-testid="baseButton-primary"] {
     border-left: 5px solid #FFFFFF !important;
     border-radius: 0 8px 8px 0 !important;
     color: #ffffff !important;
-    font-size: 1.08rem !important;
+    font-size: 1.15rem !important;
     font-weight: 700 !important;
     box-shadow: 0 4px 10px rgba(236, 32, 36, 0.3) !important;
 }
 
-/* Primary (Active) Hover State */
+/* Hover state for Active button */
+section[data-testid="stSidebar"] button[kind="primary"]:hover,
 section[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:hover {
     background-color: #d11a1e !important;
     background: #d11a1e !important;
     border-color: #d11a1e !important;
-    border-left: 5px solid #FFFFFF !important;
     color: #ffffff !important;
 }
 
-/* General resets for sidebar buttons */
+/* Sidebar button resets */
 section[data-testid="stSidebar"] button:focus,
 section[data-testid="stSidebar"] button:focus-visible,
 section[data-testid="stSidebar"] button:active {
@@ -167,12 +167,11 @@ section[data-testid="stSidebar"] button:active {
     outline: none !important;
 }
 
-/* Nav dividers */
+/* Nav dividers spacing */
 [data-testid="stSidebar"] hr {
     border: none !important;
     border-top: 1px solid #2a2a2a !important;
     margin: 6px 0 !important;
     background: none !important;
-}
 
 
