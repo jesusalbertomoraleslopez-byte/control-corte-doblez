@@ -851,7 +851,9 @@ def view_reportes():
         # Calcular los 7 días de la semana
         lunes = ref_date - pd.Timedelta(days=ref_date.weekday())
         dias_semana = [lunes + pd.Timedelta(days=i) for i in range(7)]
-        dias_labels = ["L", "M", "M", "J", "V", "S", "D"]
+        dias_letras = ["L", "M", "M", "J", "V", "S", "D"]
+        # Labels con fecha real para identificar cada día claramente en el chart
+        dias_labels = [f"{dias_letras[i]}-{(lunes + pd.Timedelta(days=i)).strftime('%d')}" for i in range(7)]
         dias_nombres_completos = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
         
         # Consultar avances y rechazos para cada día de la semana
@@ -869,6 +871,14 @@ def view_reportes():
         wip_dias = []
         wip_valores = []
         
+        # Para calcular delta (reducción diaria del WIP)
+        wip_prev_by_area = {}  # WIP del día anterior por área
+        wip_delta_areas = []
+        wip_delta_dias = []
+        wip_delta_valores = []
+        
+        total_produccion_semana = 0
+        
         for idx_day, d in enumerate(dias_semana):
             date_str = d.strftime('%Y-%m-%d')
             day_label = dias_labels[idx_day]
@@ -884,8 +894,11 @@ def view_reportes():
                 conn, params=(date_str,)
             )
             
-            # Calcular WIP de este día
+            # Calcular WIP de este día (acumulado hasta este día)
             wip_on_date = calculate_wip_on_date(of_list, date_str)
+            
+            # Sumar producción total del día para detectar semanas vacías
+            total_produccion_semana += (df_av_d['total'].sum() if not df_av_d.empty else 0)
             
             for proc in relevant_procs:
                 proc_friendly = friendly_names.get(proc, proc)
@@ -902,13 +915,33 @@ def view_reportes():
                 scrap_dias.append(day_label)
                 scrap_valores.append(int(s_val))
                 
-                # WIP
+                # WIP absoluto
                 w_val = wip_on_date.get(proc, 0)
                 wip_areas.append(proc_friendly)
                 wip_dias.append(day_label)
                 wip_valores.append(int(w_val))
                 
+                # Delta: reducción del WIP respecto al día anterior
+                prev_wip = wip_prev_by_area.get(proc, None)
+                if prev_wip is not None:
+                    delta = prev_wip - w_val  # positivo = bajó el WIP (se avanzó)
+                else:
+                    delta = 0  # primer día, sin comparación
+                wip_delta_areas.append(proc_friendly)
+                wip_delta_dias.append(day_label)
+                wip_delta_valores.append(int(delta))
+                wip_prev_by_area[proc] = w_val
+                
         conn.close()
+        
+        # Aviso si la semana seleccionada no tiene producción registrada
+        if total_produccion_semana == 0:
+            st.warning(
+                f"⚠️ La semana del {lunes.strftime('%d/%m/%Y')} al {dias_semana[-1].strftime('%d/%m/%Y')} "
+                f"**no tiene avances de producción registrados**. "
+                f"Los valores del WIP se muestran tal como quedaron al final de la semana anterior sin variación diaria. "
+                f"Selecciona otra semana con producción registrada para ver la evolución diaria."
+            )
         
         # Crear pestañas para las 3 gráficas
         tab_prod_w, tab_scrap_w, tab_wip_w = st.tabs([
@@ -922,10 +955,11 @@ def view_reportes():
         # Paleta de colores para los días L M M J V S D
         colors_days = ['#FFD700', '#FF8C00', '#FF4500', '#EC2024', '#9370DB', '#00BFFF', '#32CD32']
         
-        # Construir listas de colores repetidas
+        # Construir listas de colores repetidas (usando índice del label)
         prod_colors_list = [colors_days[dias_labels.index(d)] for d in prod_dias]
         scrap_colors_list = [colors_days[dias_labels.index(d)] for d in scrap_dias]
         wip_colors_list = [colors_days[dias_labels.index(d)] for d in wip_dias]
+        wip_delta_colors_list = [colors_days[dias_labels.index(d)] for d in wip_delta_dias]
         
         with tab_prod_w:
             fig_p = go.Figure()
@@ -966,6 +1000,7 @@ def view_reportes():
             st.plotly_chart(fig_s, use_container_width=True)
             
         with tab_wip_w:
+            st.markdown("**WIP Acumulado al Final de Cada Día** — piezas en espera de ser procesadas")
             fig_w = go.Figure()
             fig_w.add_trace(go.Bar(
                 x=[wip_areas, wip_dias],
@@ -975,7 +1010,7 @@ def view_reportes():
                 textposition='outside'
             ))
             fig_w.update_layout(
-                title=f"<b>Evolución del WIP por Estación (Semana del {lunes.strftime('%d/%m/%Y')} al {dias_semana[-1].strftime('%d/%m/%Y')})</b>",
+                title=f"<b>WIP por Estación al Cierre de Cada Día (Semana {lunes.strftime('%d/%m/%Y')} – {dias_semana[-1].strftime('%d/%m/%Y')})</b>",
                 title_x=0.5,
                 xaxis_title="Proceso / Día de la Semana",
                 yaxis_title="Piezas en WIP",
@@ -983,6 +1018,26 @@ def view_reportes():
                 margin=dict(t=50, b=50, l=40, r=40)
             )
             st.plotly_chart(fig_w, use_container_width=True)
+            
+            st.markdown("---")
+            st.markdown("**Reducción Diaria del WIP** — cuántas piezas se avanzaron por área cada día (WIP día anterior − WIP día actual)")
+            fig_delta = go.Figure()
+            fig_delta.add_trace(go.Bar(
+                x=[wip_delta_areas, wip_delta_dias],
+                y=wip_delta_valores,
+                marker_color=wip_delta_colors_list,
+                text=wip_delta_valores,
+                textposition='outside'
+            ))
+            fig_delta.update_layout(
+                title=f"<b>Reducción Diaria del WIP por Estación (Semana {lunes.strftime('%d/%m/%Y')} – {dias_semana[-1].strftime('%d/%m/%Y')})</b>",
+                title_x=0.5,
+                xaxis_title="Proceso / Día de la Semana",
+                yaxis_title="Piezas avanzadas (WIP reducido)",
+                height=450,
+                margin=dict(t=50, b=50, l=40, r=40)
+            )
+            st.plotly_chart(fig_delta, use_container_width=True)
         
     else:
         st.info("No hay datos para esta OF.")
