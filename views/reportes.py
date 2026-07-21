@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from utils.database import get_connection, get_todas_piezas, get_nidos, get_all_ofs
+from utils.database import get_connection, get_todas_piezas, get_nidos, get_all_ofs, get_local_today
 from views.avances import PROCESSES
 
 def get_area_anterior(ruta_str, current_area):
@@ -408,7 +408,7 @@ def view_reportes():
     import datetime
     dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-    today = datetime.date.today()
+    today = get_local_today()
     dia_nombre = dias_semana[today.weekday()]
     mes_nombre = meses[today.month - 1]
     fecha_grande = f"{dia_nombre}, {today.day} de {mes_nombre} de {today.year}"

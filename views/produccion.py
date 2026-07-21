@@ -7,7 +7,7 @@ import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.plantilla_excel import generar_plantilla
-from utils.database import clear_db, clear_avances_rechazos, save_production_plan, get_active_of, get_todas_piezas, update_ruta_piezas
+from utils.database import clear_db, clear_avances_rechazos, save_production_plan, get_active_of, get_todas_piezas, update_ruta_piezas, get_local_today
 from views.avances import view_avances, PROCESSES
 from views.reportes import view_reportes
 from views.correcciones import view_correcciones
@@ -203,7 +203,7 @@ def view_planeacion():
             # Formatear columnas
             df_prog["INICIO"] = df_prog["gantt_inicio"].apply(to_date_safe)
             # Si es nulo, usar la fecha de hoy por defecto
-            df_prog["INICIO"] = df_prog["INICIO"].fillna(datetime.date.today())
+            df_prog["INICIO"] = df_prog["INICIO"].fillna(get_local_today())
             df_prog["DIAS"] = df_prog["gantt_dias"].fillna(1).astype(int)
             df_prog["AVANCE"] = df_prog["gantt_avance"].fillna("PENDIENTE").astype(str)
             
@@ -502,8 +502,7 @@ def view_planeacion():
                         mail_cc = st.text_input("CC (Copia):", value=config_correo["cc"], key="gantt_mail_cc")
                         
                     # Calcular semana y fecha actual para el asunto
-                    import datetime
-                    today = datetime.date.today()
+                    today = get_local_today()
                     week_num = today.isocalendar()[1]
                     date_str = today.strftime("%d/%m/%Y")
                     default_subject = f"PLANTA METALES Plan de Producción Corte Láser - Sem {week_num} ({date_str}) - SIGRAMA"

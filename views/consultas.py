@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 import io
 from views.reportes import view_reportes
 
-from utils.database import get_connection as _get_db_connection
+from utils.database import get_connection as _get_db_connection, get_local_now, get_local_today
 
 def get_connection():
     return _get_db_connection()
@@ -284,8 +284,7 @@ def view_consultas():
 
     # --- PESTAÑA 1: Avance del Día ---
     if active_tab == "📅 Avance del Día":
-        st.subheader("Reporte Diario de Avances PLANTA METALES")
-        selected_date = st.date_input("Selecciona el día a consultar:", datetime.today())
+        selected_date = st.date_input("Selecciona el día a consultar:", get_local_today())
         
         # Format date as YYYY-MM-DD
         date_str = selected_date.strftime("%Y-%m-%d")
@@ -378,7 +377,7 @@ def view_consultas():
         st.subheader("Tendencia Semanal por Área (Últimos 7 días)")
         
         # Fecha hace 7 dias
-        fecha_fin = datetime.today()
+        fecha_fin = get_local_now()
         fecha_inicio = fecha_fin - timedelta(days=6)
         
         query_semana = """
@@ -772,7 +771,7 @@ def view_consultas():
 
                         ws.merge_range("A1:K1", "SIGRAMA — Reporte de Material Programado", fmt_title)
                         ws.merge_range("A2:K2",
-                            f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}   |   OFs: {', '.join(df['OF'].unique())}",
+                            f"Generado: {get_local_now().strftime('%d/%m/%Y %H:%M')}   |   OFs: {', '.join(df['OF'].unique())}",
                             fmt_subtitle)
                         ws.write("A3", "", fmt_subtitle)
 
@@ -1313,8 +1312,7 @@ def view_consultas():
                             with col_c2:
                                 mail_cc = st.text_input("CC (Copia):", value=config_correo["cc"], key="wip_mail_cc")
                                 
-                            import datetime as _dt
-                            today_str = _dt.date.today().strftime("%d/%m/%Y")
+                            today_str = get_local_today().strftime("%d/%m/%Y")
                             default_subj = f"PLANTA METALES Estatus de WIP por SKU - {today_str} - SIGRAMA"
                             mail_subject = st.text_input("Asunto:", value=default_subj, key="wip_mail_subject")
                             
@@ -1468,7 +1466,7 @@ def view_public_avance_diario():
     # Selector de fecha compacto en la misma línea que el título
     col_t, col_d = st.columns([3, 1])
     with col_d:
-        selected_date = st.date_input("Fecha de Consulta:", datetime.today(), label_visibility="collapsed")
+        selected_date = st.date_input("Fecha de Consulta:", get_local_today(), label_visibility="collapsed")
     
     date_str = selected_date.strftime("%Y-%m-%d")
     fecha_formateada = selected_date.strftime("%d/%m/%Y")
@@ -1587,7 +1585,7 @@ def view_public_gantt():
     df_prog["total_piezas"] = df_prog["total_piezas"].fillna(0).astype(int)
     
     df_prog["INICIO"] = df_prog["gantt_inicio"].apply(to_date_safe)
-    df_prog["INICIO"] = df_prog["INICIO"].fillna(datetime.today().date())
+    df_prog["INICIO"] = df_prog["INICIO"].fillna(get_local_today())
     df_prog["DIAS"] = df_prog["gantt_dias"].fillna(1).astype(int)
     df_prog["AVANCE"] = df_prog["gantt_avance"].fillna("PENDIENTE").astype(str)
     
@@ -1643,7 +1641,7 @@ def view_public_gantt():
         db_min_date = valid_rows["INICIO"].min()
         db_max_date = valid_rows["FINAL APROXIMADO"].max()
         
-        today = datetime.today().date()
+        today = get_local_today()
         default_start = today - timedelta(days=7)
         default_end = today + timedelta(days=21)
         
@@ -1807,8 +1805,9 @@ def view_public_rotativo():
         
     elif current_screen == 4:
         # Avance Diario
-        date_str = datetime.today().strftime("%Y-%m-%d")
-        fecha_formateada = datetime.today().strftime("%d/%m/%Y")
+        local_now = get_local_now()
+        date_str = local_now.strftime("%Y-%m-%d")
+        fecha_formateada = local_now.strftime("%d/%m/%Y")
         
         st.markdown(f'<h2 style="margin-top:0; margin-bottom:10px; font-weight:900; font-family:\'Montserrat\'">📅 Avance Diario PLANTA METALES ({fecha_formateada})</h2>', unsafe_allow_html=True)
         

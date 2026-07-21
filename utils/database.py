@@ -11,6 +11,14 @@ TEMP_DB_PATH = "sigrama_temp.db"
 
 _last_excel_mtime = 0
 
+def get_local_now():
+    """Retorna la fecha y hora actual en zona horaria de México (GMT-6)."""
+    return datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6)
+
+def get_local_today():
+    """Retorna la fecha de hoy en zona horaria de México (GMT-6)."""
+    return get_local_now().date()
+
 def sync_and_push_db():
     """Sincroniza la base de datos local con GitHub resolviendo conflictos a nivel de datos en Python."""
     import streamlit as st
@@ -112,7 +120,7 @@ def sync_and_push_db():
 
     # Crear commit
     res_commit = subprocess.run(
-        ["git", "commit", "-m", f"Sync DB Excel {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
+        ["git", "commit", "-m", f"Sync DB Excel {get_local_now().strftime('%Y-%m-%d %H:%M:%S')}"],
         capture_output=True, timeout=15
     )
 
@@ -455,7 +463,7 @@ def save_production_plan(of_number, proyecto, programador, fecha, df_nidos, df_p
         c.execute(f"DELETE FROM {t} WHERE of_number = ?", (of_number,))
         
     # 2. Insertar Orden
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = get_local_now().strftime("%Y-%m-%d %H:%M:%S")
     c.execute("""
         INSERT INTO ordenes (of_number, proyecto, programador, fecha, fecha_carga, po, descripcion_pronest, calibre, prioridad, proyecto_cliente)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -618,7 +626,7 @@ def save_avances_mixto(of_number, nido, area, is_corte, df_terminadas, df_rechaz
     Para Corte, df_terminadas trae todo el nido. Para otras, trae piezas individuales."""
     conn = get_connection()
     c = conn.cursor()
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = get_local_now().strftime("%Y-%m-%d %H:%M:%S")
     
     # 1. Registrar el avance
     if not df_terminadas.empty:

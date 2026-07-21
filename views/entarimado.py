@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import datetime
-from utils.database import get_connection, save_db_to_excel, sync_and_push_db
+from utils.database import get_connection, save_db_to_excel, sync_and_push_db, get_local_now
 
 def get_inventario_pt():
     conn = get_connection()
@@ -312,8 +312,8 @@ def view_entarimado():
                 if st.button("📦 Confirmar Entarimado", type="primary", use_container_width=True):
                     conn = get_connection()
                     cursor = conn.cursor()
-                    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    lote_id = f"ENT-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                    now_str = get_local_now().strftime("%Y-%m-%d %H:%M:%S")
+                    lote_id = f"ENT-{get_local_now().strftime('%Y%m%d-%H%M%S')}"
 
                     for _, row in seleccionadas.iterrows():
                         cursor.execute("""
@@ -350,7 +350,7 @@ def view_entarimado():
             st.download_button(
                 label="📥 Descargar Excel",
                 data=excel_bytes,
-                file_name=f"historial_entarimado_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                file_name=f"historial_entarimado_{get_local_now().strftime('%Y%m%d_%H%M')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 type="primary"
