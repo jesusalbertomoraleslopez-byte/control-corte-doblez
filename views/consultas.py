@@ -48,6 +48,7 @@ def calculate_sku_wip_report(df_uploaded, of_list):
         """, conn)
         df_avances = pd.read_sql_query("SELECT of_number, nido, no_pieza, area, SUM(cantidad) as cantidad FROM avances GROUP BY of_number, nido, no_pieza, area", conn)
         df_rechazos = pd.read_sql_query("SELECT of_number, nido, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos GROUP BY of_number, nido, no_pieza, area", conn)
+        df_tarimas = pd.read_sql_query("SELECT of_number, no_pieza, SUM(cantidad) as cantidad FROM tarimas GROUP BY of_number, no_pieza", conn)
         
         c = conn.cursor()
         c.execute("""
@@ -68,6 +69,7 @@ def calculate_sku_wip_report(df_uploaded, of_list):
         """, conn, params=tuple(of_list))
         df_avances = pd.read_sql_query(f"SELECT of_number, nido, no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number IN ({placeholders}) GROUP BY of_number, nido, no_pieza, area", conn, params=tuple(of_list))
         df_rechazos = pd.read_sql_query(f"SELECT of_number, nido, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number IN ({placeholders}) GROUP BY of_number, nido, no_pieza, area", conn, params=tuple(of_list))
+        df_tarimas = pd.read_sql_query(f"SELECT of_number, no_pieza, SUM(cantidad) as cantidad FROM tarimas WHERE of_number IN ({placeholders}) GROUP BY of_number, no_pieza", conn, params=tuple(of_list))
         
         c = conn.cursor()
         c.execute(f"""
@@ -84,6 +86,12 @@ def calculate_sku_wip_report(df_uploaded, of_list):
     df_db_pzs["no_pieza"] = df_db_pzs["no_pieza"].astype(str).str.strip()
     df_avances["no_pieza"] = df_avances["no_pieza"].astype(str).str.strip()
     df_rechazos["no_pieza"] = df_rechazos["no_pieza"].astype(str).str.strip()
+    if not df_tarimas.empty:
+        df_tarimas["no_pieza"] = df_tarimas["no_pieza"].astype(str).str.strip()
+        df_ta_of = df_tarimas.groupby(["of_number", "no_pieza"])["cantidad"].sum().reset_index()
+        tarimas_of_map = df_ta_of.set_index(["of_number", "no_pieza"])["cantidad"].to_dict()
+    else:
+        tarimas_of_map = {}
     
     df_db_pzs["total_requeridas"] = pd.to_numeric(df_db_pzs["cantidad"], errors="coerce").fillna(0) * pd.to_numeric(df_db_pzs["hojas"], errors="coerce").fillna(1)
     
@@ -114,11 +122,14 @@ def calculate_sku_wip_report(df_uploaded, of_list):
             "Piezas por Barrenar": 0,
             "Piezas por Pintar": 0,
             "Piezas por Liberar": 0,
-            "Piezas por Empacar": 0
+            "Piezas por Empacar": 0,
+            "Piezas Entarimadas": 0
         }
         
         if df_p_db.empty:
             wip_row["Piezas por Diseñar"] = total_req
+            if not df_tarimas.empty:
+                wip_row["Piezas Entarimadas"] = int(df_tarimas[df_tarimas["no_pieza"] == sku]["cantidad"].sum())
         else:
             system_wip = {a: 0 for a in areas_wip}
             
@@ -187,13 +198,21 @@ def calculate_sku_wip_report(df_uploaded, of_list):
             else:
                 assigned_wip["Corte"] = rem_total
                 
+            total_entarimadas = int(sum(
+                tarimas_of_map.get((of_n, sku), 0)
+                for of_n in df_p_db["of_number"].unique()
+            ))
+            raw_empaque = int(assigned_wip.get("Empaque", 0))
+            piezas_por_empacar = max(0, raw_empaque - total_entarimadas)
+
             wip_row["Piezas por Cortar"] = assigned_wip.get("Corte", 0)
             wip_row["Piezas por Rebabear"] = assigned_wip.get("Rebabeo", 0)
             wip_row["Piezas por Doblar"] = assigned_wip.get("Doblez", 0)
             wip_row["Piezas por Barrenar"] = assigned_wip.get("Barrenado", 0)
             wip_row["Piezas por Pintar"] = assigned_wip.get("Pintura", 0)
             wip_row["Piezas por Liberar"] = assigned_wip.get("Liberado", 0)
-            wip_row["Piezas por Empacar"] = assigned_wip.get("Empaque", 0)
+            wip_row["Piezas por Empacar"] = piezas_por_empacar
+            wip_row["Piezas Entarimadas"] = total_entarimadas
             
         report_rows.append(wip_row)
         
@@ -213,7 +232,8 @@ def generate_sku_wip_report_excel(df_report):
         "Piezas por Barrenar": df_report["Piezas por Barrenar"].sum(),
         "Piezas por Pintar": df_report["Piezas por Pintar"].sum(),
         "Piezas por Liberar": df_report["Piezas por Liberar"].sum(),
-        "Piezas por Empacar": df_report["Piezas por Empacar"].sum()
+        "Piezas por Empacar": df_report["Piezas por Empacar"].sum(),
+        "Piezas Entarimadas": df_report["Piezas Entarimadas"].sum()
     }
     df_excel = pd.concat([df_report, pd.DataFrame([subtotales])], ignore_index=True)
     
@@ -1039,7 +1059,7 @@ def view_consultas():
                     st.markdown("##### 📍 Inventario en Proceso (WIP) por Estación:")
                     
                     # Vamos a mostrar columnas tipo Pipeline de Producción
-                    pipeline_cols = st.columns(8)
+                    pipeline_cols = st.columns(9)
                     areas_pipeline = [
                         ("Diseño", "Piezas por Diseñar", "🎨"),
                         ("Corte", "Piezas por Cortar", "🔥"),
@@ -1048,7 +1068,8 @@ def view_consultas():
                         ("Barrenado", "Piezas por Barrenar", "⚙️"),
                         ("Pintura", "Piezas por Pintar", "🖌️"),
                         ("Liberado", "Piezas por Liberar", "🔎"),
-                        ("Empaque", "Piezas por Empacar", "📦")
+                        ("Empaque", "Piezas por Empacar", "📦"),
+                        ("Entarimado", "Piezas Entarimadas", "🪵")
                     ]
                     
                     for idx_pipe, (nombre_area, col_rep, emoji) in enumerate(areas_pipeline):
@@ -1205,7 +1226,8 @@ def view_consultas():
                             "Piezas por Barrenar": df_report["Piezas por Barrenar"].sum(),
                             "Piezas por Pintar": df_report["Piezas por Pintar"].sum(),
                             "Piezas por Liberar": df_report["Piezas por Liberar"].sum(),
-                            "Piezas por Empacar": df_report["Piezas por Empacar"].sum()
+                            "Piezas por Empacar": df_report["Piezas por Empacar"].sum(),
+                            "Piezas Entarimadas": df_report["Piezas Entarimadas"].sum()
                         }
                         df_display = pd.concat([df_report, pd.DataFrame([subtotales])], ignore_index=True)
                         
@@ -1235,7 +1257,8 @@ def view_consultas():
                             "Piezas por Barrenar": "Barrenado",
                             "Piezas por Pintar": "Pintura",
                             "Piezas por Liberar": "Liberado",
-                            "Piezas por Empacar": "Empaque"
+                            "Piezas por Empacar": "Empaque",
+                            "Piezas Entarimadas": "Entarimado"
                         }
                         
                         pareto_data = []
@@ -1331,6 +1354,7 @@ def view_consultas():
                                     <td style="padding: 8px; text-align: center;">{row['Piezas por Pintar']}</td>
                                     <td style="padding: 8px; text-align: center;">{row['Piezas por Liberar']}</td>
                                     <td style="padding: 8px; text-align: center;">{row['Piezas por Empacar']}</td>
+                                    <td style="padding: 8px; text-align: center;">{row['Piezas Entarimadas']}</td>
                                 </tr>
                                 """
                                 
@@ -1347,6 +1371,7 @@ def view_consultas():
                                 <td style="padding: 8px; text-align: center;">{subtotales['Piezas por Pintar']}</td>
                                 <td style="padding: 8px; text-align: center;">{subtotales['Piezas por Liberar']}</td>
                                 <td style="padding: 8px; text-align: center;">{subtotales['Piezas por Empacar']}</td>
+                                <td style="padding: 8px; text-align: center;">{subtotales['Piezas Entarimadas']}</td>
                             </tr>
                             """
                             
@@ -1376,6 +1401,7 @@ def view_consultas():
                                                         <th style="padding: 8px; text-align: center;">Por Pintar</th>
                                                         <th style="padding: 8px; text-align: center;">Por Liberar</th>
                                                         <th style="padding: 8px; text-align: center;">Por Empacar</th>
+                                                        <th style="padding: 8px; text-align: center;">Entarimadas</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
