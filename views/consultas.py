@@ -394,40 +394,115 @@ def view_consultas():
 
     # --- PESTAÑA 2: Avance Semanal ---
     elif active_tab == "📊 Avance Semanal":
-        st.subheader("Tendencia Semanal por Área (Últimos 7 días)")
+        st.subheader("📊 Tendencia Semanal de Producción por Área")
         
-        # Fecha hace 7 dias
+        # Paleta de colores por área para consistencia visual
+        AREA_COLORS = {
+            "Ingenieria": "#2980B9",
+            "Diseño": "#3498DB",
+            "Corte": "#EC2024",
+            "Rebabeo": "#F39C12",
+            "Doblez": "#9B59B6",
+            "Barrenado": "#16A085",
+            "Pintura": "#E67E22",
+            "Liberado": "#2ECC71",
+            "Empaque": "#D35400",
+            "Entarimado": "#7F8C8D"
+        }
+
+        col_type, col_range = st.columns([2.5, 1.5])
+        with col_type:
+            chart_type = st.radio(
+                "Tipo de Gráfica:",
+                ["📊 Barras Agrupadas", "🥞 Barras Apiladas", "📈 Líneas de Tendencia"],
+                horizontal=True,
+                key="semana_chart_type"
+            )
+        with col_range:
+            dias_consulta = st.selectbox(
+                "Rango de Fechas:",
+                [7, 14, 30],
+                format_func=lambda x: f"Últimos {x} días",
+                key="semana_dias_select"
+            )
+        
         fecha_fin = get_local_now()
-        fecha_inicio = fecha_fin - timedelta(days=6)
+        fecha_inicio = fecha_fin - timedelta(days=dias_consulta - 1)
         
         query_semana = """
         SELECT date(timestamp) as Fecha, area as Área, sum(cantidad) as Total
         FROM avances 
         WHERE date(timestamp) BETWEEN ? AND ?
         GROUP BY date(timestamp), area
-        ORDER BY date(timestamp)
+        ORDER BY date(timestamp) ASC
         """
         df_semana = fetch_data(query_semana, (fecha_inicio.strftime("%Y-%m-%d"), fecha_fin.strftime("%Y-%m-%d")))
         
         if df_semana.empty:
-            st.info("No hay registros en los últimos 7 días.")
+            st.info(f"No hay registros de producción en los últimos {dias_consulta} días.")
         else:
-            # Crear una gráfica por cada área encontrada
-            areas_presentes = df_semana['Área'].unique()
-            
-            for area in areas_presentes:
-                df_area = df_semana[df_semana['Área'] == area]
-                fig = px.bar(
-                    df_area, 
-                    x='Fecha', 
-                    y='Total', 
-                    title=f"Avance en {area}",
-                    text='Total',
-                    color_discrete_sequence=['#EC2024']
+            # Gráfica unificada con todas las áreas en colores distintos
+            if chart_type == "📈 Líneas de Tendencia":
+                fig = px.line(
+                    df_semana,
+                    x="Fecha",
+                    y="Total",
+                    color="Área",
+                    color_discrete_map=AREA_COLORS,
+                    markers=True,
+                    title=f"<b>Evolución Diaria de Producción por Área (Últimos {dias_consulta} Días)</b>"
                 )
-                fig.update_traces(textposition='outside')
-                fig.update_layout(xaxis_type='category', margin=dict(t=40, b=10, l=10, r=10))
-                st.plotly_chart(fig, use_container_width=True)
+                fig.update_traces(line=dict(width=3), marker=dict(size=8))
+            else:
+                bmode = "group" if chart_type == "📊 Barras Agrupadas" else "stack"
+                fig = px.bar(
+                    df_semana,
+                    x="Fecha",
+                    y="Total",
+                    color="Área",
+                    color_discrete_map=AREA_COLORS,
+                    barmode=bmode,
+                    text="Total",
+                    title=f"<b>Avance Comparativo por Área (Últimos {dias_consulta} Días)</b>"
+                )
+                fig.update_traces(textposition="outside" if bmode == "group" else "inside")
+
+            fig.update_layout(
+                xaxis_type="category",
+                title_x=0.5,
+                legend_title_text="Estación / Área",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                margin=dict(t=70, b=40, l=20, r=20),
+                height=480
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Resumen de totales por área en tarjetas compactas
+            st.markdown("##### 📌 Producción Acumulada del Periodo")
+            df_totales_area = df_semana.groupby("Área")["Total"].sum().reset_index()
+            
+            num_areas = len(df_totales_area)
+            if num_areas > 0:
+                cols_cards = st.columns(num_areas)
+                for idx, r in df_totales_area.iterrows():
+                    area_n = r["Área"]
+                    tot_v = int(r["Total"])
+                    color_hex = AREA_COLORS.get(area_n, "#EC2024")
+                    with cols_cards[idx]:
+                        st.markdown(
+                            f"<div style='text-align: center; padding: 10px 5px; border-radius: 8px; border: 1px solid #ddd; background-color: #FAFAFA;'>"
+                            f"<span style='font-size: 12px; font-weight: bold; color: {color_hex}; text-transform: uppercase;'>{area_n}</span><br/>"
+                            f"<span style='font-size: 20px; font-weight: 900; color: #111;'>{tot_v:,}</span> <span style='font-size: 11px; color: #666;'>pzs</span>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+            
+            # Matriz resumen (Tabla pivote por día y área)
+            st.markdown("---")
+            st.markdown("##### 📋 Matriz Numérica de Producción por Día")
+            df_pivot = df_semana.pivot(index="Área", columns="Fecha", values="Total").fillna(0).astype(int)
+            df_pivot["Total Periodo"] = df_pivot.sum(axis=1)
+            st.dataframe(df_pivot, use_container_width=True)
 
     # --- PESTAÑA 3: Trazabilidad ---
     elif active_tab == "🔍 Trazabilidad":
