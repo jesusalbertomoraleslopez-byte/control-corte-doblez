@@ -121,7 +121,7 @@ def view_dashboard_global():
     estado_counts.columns = ['Estado', 'Cantidad']
     
     fig1 = px.pie(estado_counts, names='Estado', values='Cantidad', hole=0.6, 
-                  color='Estado', color_discrete_map={"Completada": "#32CD32", "En Proceso": "#FFC107", "Pendiente": "#EC2024"})
+                  color='Estado', color_discrete_map={"Completada": "#32CD32", "En Proceso": "#FFC107", "Pendiente": "#888888"})
     fig1.update_traces(textposition='inside', textinfo='percent+label')
     fig1.update_layout(title_text="<b>ESTADO DE OFs</b>", title_x=0.5, margin=dict(t=40, b=10, l=10, r=10), height=250, showlegend=False)
     colA.plotly_chart(fig1, use_container_width=True)
@@ -220,7 +220,7 @@ def view_dashboard_global():
         with col_lt2:
             filtro_estado = st.selectbox(
                 "Filtrar Estado:",
-                ["🟡 En Proceso", "🔴 Pendiente", "🟢 Completada", "Todos"],
+                ["🟡 En Proceso", "⚪ Pendiente", "🟢 Completada", "Todos"],
                 index=0,
                 key="listado_prod_filtro_estado"
             )
@@ -238,7 +238,7 @@ def view_dashboard_global():
             
             progreso = min(100.0, (av / (tot * 4) * 100)) if tot > 0 else 0
             
-            estado = "🔴 Pendiente"
+            estado = "⚪ Pendiente"
             if progreso > 0: estado = "🟡 En Proceso"
             if progreso >= 99: estado = "🟢 Completada"
             
