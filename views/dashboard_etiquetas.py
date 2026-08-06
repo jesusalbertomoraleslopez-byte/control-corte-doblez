@@ -132,47 +132,86 @@ def view_dashboard_etiquetas():
         return
 
     # ── MÓDULO 1: Asignación y Gestión de Etiquetas Especiales ─────────────
-    with st.expander("✏️ **Asignar o Cambiar Etiqueta Especial a Órdenes (OFs)**", expanded=False):
-        st.markdown("Selecciona una o más OFs y asígnales un **Nombre Especial / Etiqueta de Proyecto** (ej. `PO-2026-X1 - Lote A`, `Proyecto Planta Norte`).")
+    with st.expander("✏️ **Asignar o Cambiar Etiqueta Especial a Órdenes (OFs)**", expanded=True):
+        st.markdown("Selecciona o escribe una **Etiqueta Especial** y marca con las **casillas de verificación (☑️)** las OFs que deseas incluir en ella.")
         
-        col_m1, col_m2 = st.columns([1.5, 2.5])
-        with col_m1:
-            proyectos_existentes = sorted(df_master["proyecto"].dropna().unique().tolist())
-            sel_proj_gestion = st.selectbox("📂 Filtrar por Proyecto Maestro / PO:", ["Todos los Proyectos"] + proyectos_existentes, key="m_proj_sel")
+        # 1. Selector / Creador de Etiqueta
+        col_tag1, col_tag2 = st.columns([1.5, 2.5])
+        with col_tag1:
+            etiquetas_disponibles = sorted([e for e in df_master["Etiqueta"].dropna().unique() if e != "Sin Etiqueta Asignada"])
+            opciones_etiqueta = ["➕ Crear Nueva Etiqueta..."] + etiquetas_disponibles
+            sel_etiqueta_existente = st.selectbox("🏷️ Selecciona Etiqueta Especial:", opciones_etiqueta, key="m_sel_tag_opt")
             
-            if sel_proj_gestion == "Todos los Proyectos":
-                df_ofs_sub = df_master
+        with col_tag2:
+            if sel_etiqueta_existente == "➕ Crear Nueva Etiqueta...":
+                nombre_etiqueta_final = st.text_input("✍️ Escribe el Nombre de la Nueva Etiqueta Especial:", placeholder="Ej. PO-2026-X1 - Lote A, Proyecto Planta Norte", key="m_new_tag_name_input")
             else:
-                df_ofs_sub = df_master[df_master["proyecto"] == sel_proj_gestion]
+                nombre_etiqueta_final = st.text_input("✍️ Nombre de la Etiqueta Seleccionada:", value=sel_etiqueta_existente, key="m_edit_tag_name_input")
                 
-            ofs_disponibles = df_ofs_sub["of_number"].tolist()
-            sel_ofs_etiquetar = st.multiselect(
-                "📍 Selecciona la(s) OF(s) a etiquetar:",
-                ofs_disponibles,
-                key="m_ofs_multisel"
-            )
+        st.markdown("---")
+        
+        # 2. Filtros para la Lista de OFs
+        st.markdown("#### 📋 Marcar las OFs que pertenecen a esta Etiqueta Especial:")
+        col_f1, col_f2 = st.columns([2, 2])
+        with col_f1:
+            proyectos_existentes = ["Todos los Proyectos"] + sorted(df_master["proyecto"].dropna().unique().tolist())
+            filtro_proj_list = st.selectbox("📂 Filtrar Lista por Proyecto Maestro / PO:", proyectos_existentes, key="m_filter_proj_list")
+        with col_f2:
+            search_of_list = st.text_input("🔍 Buscar OF por número o coincidencia:", "", key="m_search_of_list")
             
-        with col_m2:
-            nueva_etiqueta_input = st.text_input(
-                "🏷️ Nombre Especial / Etiqueta del Proyecto:",
-                placeholder="Ej. PO #9982 - Proyecto Estructuras Especiales",
-                key="m_nueva_etiqueta_input"
-            )
-            
-            # Mostrar etiquetas existentes como sugerencia rápida
-            etiquetas_sugeridas = [e for e in df_master["Etiqueta"].unique() if e != "Sin Etiqueta Asignada"]
-            if etiquetas_sugeridas:
-                st.markdown("**Etiquetas existentes en sistema:**")
-                st.caption(", ".join(etiquetas_sugeridas[:10]))
-                
-            if st.button("💾 Guardar Etiqueta Especial", type="primary", use_container_width=True, key="m_save_etiqueta_btn"):
-                if not sel_ofs_etiquetar:
-                    st.warning("⚠️ Selecciona al menos una OF.")
-                elif not nueva_etiqueta_input.strip():
-                    st.warning("⚠️ Escribe un nombre o etiqueta válida.")
+        # Filtrar el dataframe para mostrar en la lista con casillas
+        df_for_selection = df_master.copy()
+        if filtro_proj_list != "Todos los Proyectos":
+            df_for_selection = df_for_selection[df_for_selection["proyecto"] == filtro_proj_list]
+        if search_of_list.strip():
+            sq = search_of_list.strip().lower()
+            df_for_selection = df_for_selection[
+                df_for_selection["of_number"].str.lower().str.contains(sq) |
+                df_for_selection["proyecto"].astype(str).str.lower().str.contains(sq) |
+                df_for_selection["po"].astype(str).str.lower().str.contains(sq)
+            ]
+
+        # 3. Preparar DataFrame editable con Checkbox
+        current_target_tag = (nombre_etiqueta_final or "").strip()
+        df_for_selection["✅ Incluir"] = df_for_selection["Etiqueta"].apply(lambda e: bool(e and str(e).strip() == current_target_tag))
+        
+        df_editor_input = df_for_selection[["✅ Incluir", "of_number", "proyecto", "po", "Etiqueta", "total_piezas", "Progreso_OF"]].rename(columns={
+            "of_number": "OF",
+            "proyecto": "Proyecto Maestro",
+            "po": "PO",
+            "Etiqueta": "Etiqueta Actual",
+            "total_piezas": "Total Piezas",
+            "Progreso_OF": "Progreso %"
+        })
+
+        # Mostrar data editor interactivo con casillas de verificación
+        edited_df = st.data_editor(
+            df_editor_input,
+            column_config={
+                "✅ Incluir": st.column_config.CheckboxColumn("Incluir", help="Marca la casilla para agregar esta OF a la Etiqueta Especial", default=False),
+                "Progreso %": st.column_config.ProgressColumn("Progreso Estimado", min_value=0, max_value=100, format="%d%%")
+            },
+            disabled=["OF", "Proyecto Maestro", "PO", "Etiqueta Actual", "Total Piezas", "Progreso %"],
+            hide_index=True,
+            use_container_width=True,
+            key="ofs_data_editor_selector"
+        )
+        
+        # Obtener lista de OFs marcadas con casilla = True
+        ofs_seleccionadas = edited_df[edited_df["✅ Incluir"] == True]["OF"].tolist()
+        
+        col_sav1, col_sav2 = st.columns([2.5, 1.5])
+        with col_sav1:
+            st.info(f"📌 **{len(ofs_seleccionadas)} OF(s)** seleccionada(s) para llevar la etiqueta `{current_target_tag or 'Sin Nombre'}`.")
+        with col_sav2:
+            if st.button("💾 Guardar Etiqueta Especial", type="primary", use_container_width=True, key="m_save_tag_btn_new"):
+                if not current_target_tag:
+                    st.warning("⚠️ Escribe un nombre de etiqueta válido.")
+                elif not ofs_seleccionadas:
+                    st.warning("⚠️ Debes marcar al menos una casilla de verificación de OF.")
                 else:
-                    update_etiquetas_ordenes(sel_ofs_etiquetar, nueva_etiqueta_input.strip())
-                    st.success(f"✅ ¡Etiqueta `{nueva_etiqueta_input.strip()}` asignada correctamente a {len(sel_ofs_etiquetar)} OF(s)!")
+                    update_etiquetas_ordenes(ofs_seleccionadas, current_target_tag)
+                    st.success(f"✅ ¡Etiqueta `{current_target_tag}` guardada y asignada a {len(ofs_seleccionadas)} OF(s)!")
                     st.rerun()
 
     st.markdown("---")
