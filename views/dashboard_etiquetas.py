@@ -335,82 +335,67 @@ def view_dashboard_etiquetas():
         po_origin = row["PO"]
         grp_df = row["_grp_df"]
         
-        # Determinar color de tarjeta
+        # Determinar color de badge
         if "Terminados" in estado_label:
-            border_color = "#32CD32"
             badge_bg = "#d4edda"
             badge_fg = "#155724"
+            border_left_color = "#32CD32"
         elif "En Proceso" in estado_label:
-            border_color = "#FFC107"
             badge_bg = "#fff3cd"
             badge_fg = "#856404"
+            border_left_color = "#FFC107"
         else:
-            border_color = "#888888"
             badge_bg = "#e2e3e5"
             badge_fg = "#383d41"
+            border_left_color = "#888888"
 
-        card_html = f"""
-        <div style="background-color: #ffffff; border-left: 6px solid {border_color}; border-radius: 10px; padding: 18px; margin-bottom: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); border-top: 1px solid #f0f0f0; border-right: 1px solid #f0f0f0; border-bottom: 1px solid #f0f0f0;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <div>
-                    <h3 style="margin: 0; font-family: 'Montserrat', sans-serif; color: #111; font-size: 1.3rem;">🏷️ {etiqueta_name}</h3>
-                    <p style="margin: 3px 0 0 0; font-size: 0.85rem; color: #666;">
-                        <b>Proyecto:</b> {proyecto_origin} | <b>PO:</b> {po_origin or 'N/A'}
-                    </p>
-                </div>
-                <div style="background-color: {badge_bg}; color: {badge_fg}; font-weight: bold; padding: 6px 14px; border-radius: 20px; font-size: 0.9rem; font-family: 'Montserrat', sans-serif;">
-                    {estado_label} ({prog_pct:.1f}%)
-                </div>
-            </div>
+        with st.container(border=True):
+            head_col1, head_col2 = st.columns([3, 1])
+            with head_col1:
+                st.markdown(f"<h3 style='margin: 0; font-family: Montserrat; color: #111;'>🏷️ {etiqueta_name}</h3>", unsafe_allow_html=True)
+                st.caption(f"**Proyecto Maestro:** {proyecto_origin} | **PO:** {po_origin or 'N/A'}")
+            with head_col2:
+                st.markdown(
+                    f"<div style='text-align: right; padding-top: 5px;'>"
+                    f"<span style='background-color: {badge_bg}; color: {badge_fg}; font-weight: bold; padding: 6px 14px; border-radius: 20px; font-size: 0.9rem; font-family: Montserrat; display: inline-block;'>"
+                    f"{estado_label} ({prog_pct:.1f}%)"
+                    f"</span></div>",
+                    unsafe_allow_html=True
+                )
+                
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
             
-            <div style="display: flex; gap: 20px; align-items: center; margin-top: 12px; background: #fafafa; padding: 12px; border-radius: 8px;">
-                <div style="flex: 1;">
-                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: bold; color: #444; margin-bottom: 5px;">
-                        <span>Avance Global del Proyecto</span>
-                        <span>{prog_pct:.1f}%</span>
-                    </div>
-                    <div style="background-color: #e0e0e0; height: 10px; border-radius: 5px; overflow: hidden;">
-                        <div style="background-color: {border_color}; width: {prog_pct}%; height: 100%;"></div>
-                    </div>
-                </div>
-                <div style="text-align: center; min-width: 90px;">
-                    <span style="font-size: 0.75rem; color: #777; font-weight: bold; text-transform: uppercase;">OFs Unidas</span><br>
-                    <span style="font-size: 1.2rem; font-weight: 900; color: #222;">{num_ofs} OFs</span>
-                </div>
-                <div style="text-align: center; min-width: 110px;">
-                    <span style="font-size: 0.75rem; color: #777; font-weight: bold; text-transform: uppercase;">Piezas Requeridas</span><br>
-                    <span style="font-size: 1.2rem; font-weight: 900; color: #222;">{pzs_req:,} pzs</span>
-                </div>
-                <div style="text-align: center; min-width: 110px;">
-                    <span style="font-size: 0.75rem; color: #777; font-weight: bold; text-transform: uppercase;">Avances Totales</span><br>
-                    <span style="font-size: 1.2rem; font-weight: 900; color: #222;">{pzs_av:,} pzs</span>
-                </div>
-            </div>
-        </div>
-        """
-        st.markdown(card_html, unsafe_allow_html=True)
-        
-        # Expander para ver las OFs internas
-        with st.expander(f"📂 **Ver Desglose de las {num_ofs} OFs de esta Etiqueta (`{etiqueta_name}`)**"):
-            df_ofs_card = grp_df[["of_number", "proyecto", "po", "calibre", "prioridad", "total_piezas", "total_avances", "Progreso_OF"]].rename(columns={
-                "of_number": "OF",
-                "proyecto": "Proyecto",
-                "po": "PO",
-                "calibre": "Calibre",
-                "prioridad": "Parcialidad / Prioridad",
-                "total_piezas": "Total Piezas",
-                "total_avances": "Avances Totales",
-                "Progreso_OF": "Progreso %"
-            })
-            
-            st.dataframe(
-                df_ofs_card,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Progreso %": st.column_config.ProgressColumn("Progreso Estimado", min_value=0, max_value=100, format="%d%%")
-                }
-            )
+            m_col1, m_col2, m_col3, m_col4 = st.columns([2.5, 1, 1.2, 1.2])
+            with m_col1:
+                st.caption(f"**Avance Global del Proyecto ({prog_pct:.1f}%)**")
+                st.progress(min(1.0, max(0.0, float(prog_pct) / 100.0)))
+            with m_col2:
+                st.metric("OFs Unidas", f"{num_ofs} OFs")
+            with m_col3:
+                st.metric("Piezas Requeridas", f"{pzs_req:,} pzs")
+            with m_col4:
+                st.metric("Avances Totales", f"{pzs_av:,} pzs")
+                
+            with st.expander(f"📂 **Ver Desglose de las {num_ofs} OFs de esta Etiqueta (`{etiqueta_name}`)**"):
+                df_ofs_card = grp_df[["of_number", "proyecto", "po", "calibre", "prioridad", "total_piezas", "total_avances", "Progreso_OF"]].rename(columns={
+                    "of_number": "OF",
+                    "proyecto": "Proyecto",
+                    "po": "PO",
+                    "calibre": "Calibre",
+                    "prioridad": "Parcialidad / Prioridad",
+                    "total_piezas": "Total Piezas",
+                    "total_avances": "Avances Totales",
+                    "Progreso_OF": "Progreso %"
+                })
+                
+                st.dataframe(
+                    df_ofs_card,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Progreso %": st.column_config.ProgressColumn("Progreso Estimado", min_value=0, max_value=100, format="%d%%")
+                    }
+                )
 
     # ── MÓDULO 6: Tabla General Resumen y Exportación a Excel ────────────────
     st.markdown("---")
