@@ -121,6 +121,7 @@ def render_sidebar():
     MENU_ITEMS = [
         {"key": "dashboard",     "icon": "📊", "label": "Panel de Control",          "admin_only": False},
         {"key": "global",        "icon": "🌐", "label": "Monitoreo Global",          "admin_only": False},
+        {"key": "etiquetas",     "icon": "🏷️", "label": "Supervisión Etiquetas (PO)", "admin_only": False},
         None,  # separador
         {"key": "consultas",     "icon": "📋", "label": "Consultas y Reportes",     "admin_only": False},
         {"key": "planeacion",    "icon": "📅", "label": "Planeación de Corte",       "admin_only": False},
@@ -277,6 +278,7 @@ from views.dashboard import view_dashboard
 from views.dashboard_global import view_dashboard_global
 from views.manufactura import view_manufactura
 from views.entarimado import view_entarimado
+from views.dashboard_etiquetas import view_dashboard_etiquetas
 
 # --- Vistas Principales (imported from views/) ---
 
@@ -345,6 +347,8 @@ def main():
             view_dashboard()
         elif choice == "global":
             view_dashboard_global()
+        elif choice == "etiquetas":
+            view_dashboard_etiquetas()
         elif choice == "consultas":
             view_consultas()
         elif choice == "planeacion":
@@ -363,4 +367,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Force reload: 2026-07-23 11:27
+# Force reload: 2026-08-06 08:42

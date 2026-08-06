@@ -275,8 +275,10 @@ def init_db_schema(conn=None):
             cursor.execute("ALTER TABLE ordenes ADD COLUMN gantt_dias INTEGER DEFAULT 1")
         if "gantt_avance" not in columns:
             cursor.execute("ALTER TABLE ordenes ADD COLUMN gantt_avance TEXT DEFAULT 'PENDIENTE'")
+        if "etiqueta_proyecto" not in columns:
+            cursor.execute("ALTER TABLE ordenes ADD COLUMN etiqueta_proyecto TEXT")
     except Exception as e:
-        print(f"Error migrando tabla ordenes para Gantt: {e}")
+        print(f"Error migrando tabla ordenes para Gantt / Etiqueta: {e}")
     
     # 2. Tabla de Nidos
     cursor.execute('''
@@ -922,3 +924,21 @@ def save_config_correo(clave, para, cc):
     save_db_to_excel(conn)
     conn.close()
     git_sync_db()
+
+def update_etiquetas_ordenes(of_numbers, nueva_etiqueta):
+    """Actualiza la etiqueta personalizada de proyecto para una o varias OFs."""
+    if not of_numbers:
+        return
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        placeholders = ",".join(["?"] * len(of_numbers))
+        query = f"UPDATE ordenes SET etiqueta_proyecto = ? WHERE of_number IN ({placeholders})"
+        c.execute(query, tuple([nueva_etiqueta.strip()] + list(of_numbers)))
+        conn.commit()
+    except Exception as e:
+        print(f"Error actualizando etiquetas de ordenes: {e}")
+    save_db_to_excel(conn)
+    conn.close()
+    git_sync_db()
+
