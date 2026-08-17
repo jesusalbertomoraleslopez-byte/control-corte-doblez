@@ -28,6 +28,15 @@ def fetch_reporte_consumo_laminas(fecha_inicio=None, fecha_fin=None, calibre_fil
     """
     conn = get_connection()
     
+    # Expresión SQL para diferenciar Calibre y Tipo de Material (ej. Cal 12 Galvanizado vs Cal 12 ANSI 61)
+    mat_expr = """
+        CASE 
+            WHEN UPPER(COALESCE(o.of_number,'') || ' ' || COALESCE(o.po,'') || ' ' || COALESCE(o.proyecto,'') || ' ' || COALESCE(o.descripcion_pronest,'')) LIKE '%GALV%'
+            THEN COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 12') || ' Galvanizado'
+            ELSE COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 12') || ' ANSI 61'
+        END
+    """
+    
     where_clauses = ["a.area = 'Corte'"]
     params = []
     
@@ -38,7 +47,7 @@ def fetch_reporte_consumo_laminas(fecha_inicio=None, fecha_fin=None, calibre_fil
         where_clauses.append("DATE(a.timestamp) <= DATE(?)")
         params.append(str(fecha_fin))
     if calibre_filter and calibre_filter != "Todos":
-        where_clauses.append("COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 16') = ?")
+        where_clauses.append(f"({mat_expr}) = ?")
         params.append(calibre_filter)
     if of_filter and of_filter != "Todas":
         where_clauses.append("a.of_number = ?")
@@ -51,13 +60,13 @@ def fetch_reporte_consumo_laminas(fecha_inicio=None, fecha_fin=None, calibre_fil
         SELECT 
             a.of_number as [of_number],
             COUNT(DISTINCT a.nido || '_' || a.hoja) as [hojas_totales],
-            COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 16') as [calibre],
+            {mat_expr} as [calibre],
             MIN(SUBSTR(a.timestamp, 1, 10)) as [fecha_corte_raw]
         FROM avances a
         LEFT JOIN ordenes o ON a.of_number = o.of_number
         LEFT JOIN nidos n ON a.of_number = n.of_number AND a.nido = n.nido
         WHERE {where_sql}
-        GROUP BY a.of_number, COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 16')
+        GROUP BY a.of_number, {mat_expr}
         ORDER BY a.of_number ASC
     """
     df_ofs_raw = pd.read_sql_query(query_ofs, conn, params=params)
@@ -65,13 +74,13 @@ def fetch_reporte_consumo_laminas(fecha_inicio=None, fecha_fin=None, calibre_fil
     # 2. Resumen por Calibre / Material
     query_calibres = f"""
         SELECT 
-            COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 16') as [calibre],
+            {mat_expr} as [calibre],
             COUNT(DISTINCT a.nido || '_' || a.hoja) as [hojas_totales]
         FROM avances a
         LEFT JOIN ordenes o ON a.of_number = o.of_number
         LEFT JOIN nidos n ON a.of_number = n.of_number AND a.nido = n.nido
         WHERE {where_sql}
-        GROUP BY COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 16')
+        GROUP BY {mat_expr}
         ORDER BY [hojas_totales] DESC
     """
     df_calibres_raw = pd.read_sql_query(query_calibres, conn, params=params)
@@ -82,7 +91,7 @@ def fetch_reporte_consumo_laminas(fecha_inicio=None, fecha_fin=None, calibre_fil
             SUBSTR(a.timestamp, 1, 10) as [fecha_raw],
             COUNT(DISTINCT a.nido || '_' || a.hoja) as [hojas_totales],
             COUNT(DISTINCT a.of_number) as [total_ofs],
-            GROUP_CONCAT(DISTINCT COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 16')) as [calibres]
+            GROUP_CONCAT(DISTINCT {mat_expr}) as [calibres]
         FROM avances a
         LEFT JOIN ordenes o ON a.of_number = o.of_number
         LEFT JOIN nidos n ON a.of_number = n.of_number AND a.nido = n.nido
@@ -98,7 +107,7 @@ def fetch_reporte_consumo_laminas(fecha_inicio=None, fecha_fin=None, calibre_fil
             a.of_number as [OF],
             a.nido as [Nido],
             a.hoja as [Hoja #],
-            COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 16') as [Calibre],
+            {mat_expr} as [Calibre / Material],
             a.operador as [Operador],
             a.maquina as [Máquina],
             a.timestamp as [Fecha/Hora Corte]
@@ -297,12 +306,21 @@ def generate_excel_consumo_laminas(df_ofs, df_calibres, df_fechas, df_detalle, m
 
     return output.getvalue()
 
-def generate_eml_consumo_laminas(df_ofs, df_calibres, metadata):
-    """Genera archivo de correo (.eml) en memoria listo para enviar desde cliente de correo."""
-    msg = MIMEMultipart('alternative')
+def generate_eml_consumo_laminas(df_ofs, df_calibres, metadata, excel_bytes=None, pdf_bytes=None):
+    """Genera archivo de correo (.eml) conteniendo el cuerpo HTML y los adjuntos Excel y PDF."""
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders
+
+    msg = MIMEMultipart('mixed')
     msg['Subject'] = f"[SIGRAMA] Reporte Oficial de Consumo de Láminas - Almacén ({metadata['fecha_inicio']} a {metadata['fecha_fin']})"
     msg['From'] = "sistema_sigrama@planta.com"
     msg['To'] = "almacen@sigrama.com, produccion@sigrama.com"
+    msg['X-Unsent'] = '1'
+    
+    # Body container
+    body_container = MIMEMultipart('alternative')
     
     # Construir HTML de las tablas
     rows_ofs_html = ""
@@ -311,7 +329,7 @@ def generate_eml_consumo_laminas(df_ofs, df_calibres, metadata):
         <tr>
             <td style="padding:8px;border:1px solid #ddd;font-family:sans-serif;font-size:12px;">{r['RESUMEN DE ORDENES DE FABRICACION']}</td>
             <td style="padding:8px;border:1px solid #ddd;font-family:sans-serif;font-size:12px;text-align:center;font-weight:bold;color:#EC2024;">{r['Cantidad de Hojas Totales (Hojas)']}</td>
-            <td style="padding:8px;border:1px solid #ddd;font-family:sans-serif;font-size:12px;text-align:center;">{r['Material Calibre']}</td>
+            <td style="padding:8px;border:1px solid #ddd;font-family:sans-serif;font-size:12px;text-align:center;font-weight:bold;">{r['Material Calibre']}</td>
             <td style="padding:8px;border:1px solid #ddd;font-family:sans-serif;font-size:12px;text-align:center;">{r['Fecha de Corte']}</td>
         </tr>
         """
@@ -371,6 +389,12 @@ def generate_eml_consumo_laminas(df_ofs, df_calibres, metadata):
                 </tbody>
             </table>
             
+            <div style="background-color:#fffdf5;border-left:4px solid #f59e0b;padding:12px;margin:20px 0;font-size:12px;border-radius:4px;">
+                <strong>📎 Archivos Adjuntos a este Correo:</strong><br>
+                1. <code>Reporte_Consumo_Laminas_{metadata['folio']}.xlsx</code> (Desglose multi-hoja en Excel)<br>
+                2. <code>Vale_Oficial_Consumo_Laminas_{metadata['folio']}.pdf</code> (Vale impreso con cuadro de firmas de Almacén)
+            </div>
+            
             <div style="border-top:1px solid #e2e8f0;padding-top:15px;margin-top:20px;font-size:11px;color:#a0aec0;text-align:center;">
                 Este reporte fue generado automáticamente por la plataforma <strong>SIGRAMA - Control de Corte y Doblez</strong>. Favor de procesar la baja correspondiente en el sistema de inventarios de Almacén.
             </div>
@@ -379,7 +403,25 @@ def generate_eml_consumo_laminas(df_ofs, df_calibres, metadata):
     </html>
     """
     
-    msg.attach(MIMEText(html_content, 'html'))
+    body_container.attach(MIMEText(html_content, 'html', 'utf-8'))
+    msg.attach(body_container)
+    
+    # 1. Adjuntar archivo Excel si está disponible
+    if excel_bytes:
+        part_excel = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        part_excel.set_payload(excel_bytes)
+        encoders.encode_base64(part_excel)
+        part_excel.add_header('Content-Disposition', f'attachment; filename="Reporte_Consumo_Laminas_{metadata["folio"]}.xlsx"')
+        msg.attach(part_excel)
+        
+    # 2. Adjuntar archivo PDF si está disponible
+    if pdf_bytes:
+        part_pdf = MIMEBase('application', 'pdf')
+        part_pdf.set_payload(pdf_bytes)
+        encoders.encode_base64(part_pdf)
+        part_pdf.add_header('Content-Disposition', f'attachment; filename="Vale_Oficial_Consumo_Laminas_{metadata["folio"]}.pdf"')
+        msg.attach(part_pdf)
+        
     return msg.as_bytes()
 
 def generate_pdf_consumo_laminas(df_ofs, df_calibres, metadata):

@@ -1667,8 +1667,8 @@ def view_vale_consumo_laminas():
     
     if not df_ofs.empty:
         excel_bytes = generate_excel_consumo_laminas(df_ofs, df_calibres, df_fechas, df_detalle, meta)
-        eml_bytes = generate_eml_consumo_laminas(df_ofs, df_calibres, meta)
         pdf_bytes = generate_pdf_consumo_laminas(df_ofs, df_calibres, meta)
+        eml_bytes = generate_eml_consumo_laminas(df_ofs, df_calibres, meta, excel_bytes=excel_bytes, pdf_bytes=pdf_bytes)
         
         col_d1, col_d2, col_d3 = st.columns(3)
         
