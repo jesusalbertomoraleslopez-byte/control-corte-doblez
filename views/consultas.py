@@ -1748,8 +1748,8 @@ def view_vale_consumo_laminas():
             column_config={
                 "Material / Calibre": st.column_config.TextColumn("Material / Calibre", width=200),
                 "Stock Disponible Actual": st.column_config.NumberColumn("Stock Disponible", format="%d hojas"),
-                "Hojas Cortadas (Consumo)": st.column_config.NumberColumn("Consumidas (-)", format="%d hojas"),
-                "Total Ingresado": st.column_config.NumberColumn("Total Ingresado (+)", format="%d hojas"),
+                "Cortes Posteriores (-)": st.column_config.NumberColumn("Cortes Restados (-)", format="%d hojas"),
+                "Total Hojas Ingresadas": st.column_config.NumberColumn("Total Ingresado (+)", format="%d hojas"),
                 "Estatus Stock": st.column_config.TextColumn("Estatus Stock", width=180)
             }
         )
@@ -1758,7 +1758,7 @@ def view_vale_consumo_laminas():
             fig_inv = px.bar(
                 df_inv,
                 x="Material / Calibre",
-                y=["Stock Disponible Actual", "Hojas Cortadas (Consumo)"],
+                y=["Stock Disponible Actual", "Cortes Posteriores (-)"],
                 barmode="group",
                 title="<b>DISPONIBILIDAD VS CONSUMO DE LÁMINAS POR MATERIAL</b>",
                 color_discrete_sequence=["#28a745", "#EC2024"],
