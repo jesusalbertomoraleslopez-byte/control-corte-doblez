@@ -4,6 +4,8 @@ import datetime
 import subprocess
 import threading
 import os
+import hashlib
+import shutil
 import streamlit as st
 
 EXCEL_DB_PATH = "sigrama_database.xlsx"
@@ -56,7 +58,9 @@ def sync_and_push_db():
         "rechazos": ["of_number", "nido", "no_pieza", "area", "operador", "maquina", "hoja", "timestamp", "motivo"],
         "personal_areas": ["operador_nombre", "area"],
         "config_correos": ["clave"],
-        "tarimas": ["tarima_id", "no_pieza", "of_number"]
+        "tarimas": ["tarima_id", "no_pieza", "of_number"],
+        "usuarios": ["username"],
+        "bitacora_auditoria": ["id"]
     }
 
     if has_remote:
@@ -148,7 +152,7 @@ def save_db_to_excel(conn=None):
         conn = sqlite3.connect(TEMP_DB_PATH)
         close_at_end = True
         
-    tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas"]
+    tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas", "usuarios", "bitacora_auditoria"]
     temp_excel = "sigrama_database_temp.xlsx"
     try:
         with pd.ExcelWriter(temp_excel, engine='openpyxl') as writer:
@@ -205,7 +209,7 @@ def sync_excel_to_sqlite():
         excel_file = pd.ExcelFile(EXCEL_DB_PATH)
         sheets = excel_file.sheet_names
         
-        tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas"]
+        tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas", "usuarios", "bitacora_auditoria"]
         for t in tables:
             best_match = next((s for s in sheets if s.lower() == t.lower()), None)
             if best_match:
@@ -369,10 +373,40 @@ def init_db_schema(conn=None):
             PRIMARY KEY (tarima_id, no_pieza, of_number)
         )
     ''')
+    
+    # 9. Tabla de Usuarios
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS usuarios (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            nombre_completo TEXT NOT NULL,
+            rol TEXT NOT NULL,
+            area_asignada TEXT,
+            activo INTEGER DEFAULT 1,
+            fecha_creacion TEXT NOT NULL
+        )
+    ''')
+    
+    # 10. Tabla de Bitácora de Auditoría
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bitacora_auditoria (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            usuario TEXT NOT NULL,
+            accion TEXT NOT NULL,
+            detalles TEXT
+        )
+    ''')
+    
     try:
         check_and_seed_personal_areas(cursor)
     except Exception:
         pass
+        
+    try:
+        check_and_seed_default_users(cursor)
+    except Exception as e:
+        print(f"Error sembrando usuarios por defecto: {e}")
         
     conn.commit()
     if close_at_end:
@@ -941,4 +975,157 @@ def update_etiquetas_ordenes(of_numbers, nueva_etiqueta):
     save_db_to_excel(conn)
     conn.close()
     git_sync_db()
+
+# --- SISTEMA DE AUTENTICACIÓN, AUDITORÍA Y RESPALDOS ---
+
+def hash_password(password: str) -> str:
+    """Genera un hash SHA-256 seguro para contraseñas."""
+    if not password:
+        return ""
+    return hashlib.sha256(password.strip().encode('utf-8')).hexdigest()
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """Verifica si la contraseña ingresada coincide con el hash almacenado."""
+    return hash_password(password) == password_hash
+
+def check_and_seed_default_users(cursor):
+    """Siembra usuarios por defecto en la primera ejecución."""
+    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    count = cursor.fetchone()[0]
+    if count == 0:
+        now_str = get_local_now().strftime("%Y-%m-%d %H:%M:%S")
+        admin_pass = hash_password("admin")
+        op_pass = hash_password("123")
+        cursor.execute("""
+            INSERT INTO usuarios (username, password_hash, nombre_completo, rol, area_asignada, activo, fecha_creacion)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+        """, ("admin", admin_pass, "Administrador Principal", "Administrador", "Todas", now_str))
+        cursor.execute("""
+            INSERT INTO usuarios (username, password_hash, nombre_completo, rol, area_asignada, activo, fecha_creacion)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+        """, ("operador", op_pass, "Operador General", "Operador", "Todas", now_str))
+
+def autenticar_usuario_db(username, password):
+    """Autentica un usuario consultando la base de datos SQLite."""
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute("""
+            SELECT username, password_hash, nombre_completo, rol, area_asignada, activo
+            FROM usuarios WHERE username = ?
+        """, (username.strip().lower(),))
+        row = c.fetchone()
+        conn.close()
+        if row:
+            u_name, p_hash, full_name, role, area, activo = row
+            if activo == 1 and verify_password(password, p_hash):
+                return {
+                    "username": u_name,
+                    "nombre_completo": full_name,
+                    "rol": role,
+                    "area_asignada": area or "Todas"
+                }
+    except Exception as e:
+        print(f"Error autenticando usuario: {e}")
+        try:
+            conn.close()
+        except:
+            pass
+    return None
+
+def get_todos_usuarios_db():
+    """Retorna la lista de todos los usuarios registrados."""
+    conn = get_connection()
+    try:
+        df = pd.read_sql_query("SELECT username, nombre_completo, rol, area_asignada, activo, fecha_creacion FROM usuarios ORDER BY username", conn)
+    except Exception:
+        df = pd.DataFrame()
+    conn.close()
+    return df
+
+def guardar_usuario_db(username, password, nombre_completo, rol, area_asignada="Todas", activo=1):
+    """Crea o actualiza los datos de un usuario."""
+    conn = get_connection()
+    c = conn.cursor()
+    username = username.strip().lower()
+    now_str = get_local_now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    try:
+        if password and len(password.strip()) > 0:
+            pass_hash = hash_password(password)
+            c.execute("""
+                INSERT INTO usuarios (username, password_hash, nombre_completo, rol, area_asignada, activo, fecha_creacion)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(username) DO UPDATE SET
+                    password_hash = ?,
+                    nombre_completo = ?,
+                    rol = ?,
+                    area_asignada = ?,
+                    activo = ?
+            """, (username, pass_hash, nombre_completo, rol, area_asignada, activo, now_str,
+                  pass_hash, nombre_completo, rol, area_asignada, activo))
+        else:
+            c.execute("""
+                UPDATE usuarios SET nombre_completo = ?, rol = ?, area_asignada = ?, activo = ?
+                WHERE username = ?
+            """, (nombre_completo, rol, area_asignada, activo, username))
+        conn.commit()
+    except Exception as e:
+        print(f"Error guardando usuario: {e}")
+    save_db_to_excel(conn)
+    conn.close()
+    git_sync_db()
+
+def cambiar_password_db(username, nueva_password):
+    """Cambia la contraseña de un usuario en la base de datos."""
+    conn = get_connection()
+    c = conn.cursor()
+    username = username.strip().lower()
+    pass_hash = hash_password(nueva_password)
+    try:
+        c.execute("UPDATE usuarios SET password_hash = ? WHERE username = ?", (pass_hash, username))
+        conn.commit()
+    except Exception as e:
+        print(f"Error cambiando contraseña: {e}")
+    save_db_to_excel(conn)
+    conn.close()
+    git_sync_db()
+
+def registrar_auditoria(usuario, accion, detalles=""):
+    """Registra una acción en la bitácora de auditoría inalterable."""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        now_str = get_local_now().strftime("%Y-%m-%d %H:%M:%S")
+        c.execute("INSERT INTO bitacora_auditoria (timestamp, usuario, accion, detalles) VALUES (?, ?, ?, ?)",
+                  (now_str, str(usuario), str(accion), str(detalles)))
+        conn.commit()
+        save_db_to_excel(conn)
+        conn.close()
+    except Exception as e:
+        print(f"Error al registrar bitacora de auditoria: {e}")
+
+def get_bitacora_auditoria_db(limit=300):
+    """Consulta los últimos registros de la bitácora de auditoría."""
+    conn = get_connection()
+    try:
+        df = pd.read_sql_query(f"SELECT timestamp as Fecha, usuario as Usuario, accion as Acción, detalles as Detalles FROM bitacora_auditoria ORDER BY id DESC LIMIT {limit}", conn)
+    except Exception:
+        df = pd.DataFrame()
+    conn.close()
+    return df
+
+def make_database_backup():
+    """Genera una copia de respaldo fechada en la carpeta backups/."""
+    try:
+        os.makedirs("backups", exist_ok=True)
+        t_stamp = get_local_now().strftime("%Y%m%d_%H%M%S")
+        b_path = os.path.join("backups", f"sigrama_db_backup_{t_stamp}.xlsx")
+        if os.path.exists(EXCEL_DB_PATH):
+            shutil.copy2(EXCEL_DB_PATH, b_path)
+            return b_path
+    except Exception as e:
+        print(f"Error creando backup: {e}")
+    return None
+
 

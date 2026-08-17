@@ -35,6 +35,10 @@ def check_login():
         st.session_state.logged_in = False
     if 'role' not in st.session_state:
         st.session_state.role = None
+    if 'username' not in st.session_state:
+        st.session_state.username = None
+    if 'nombre_completo' not in st.session_state:
+        st.session_state.nombre_completo = None
 
 def login():
     st.title("Acceso al Sistema - SIGRAMA")
@@ -43,23 +47,32 @@ def login():
     with st.form("login_form"):
         username = st.text_input("Usuario")
         password = st.text_input("Contraseña", type="password")
-        submit = st.form_submit_button("Ingresar")
+        submit = st.form_submit_button("Ingresar", type="primary", use_container_width=True)
         
         if submit:
-            if username == "admin" and password == "admin":
+            from utils.database import autenticar_usuario_db, registrar_auditoria
+            u_info = autenticar_usuario_db(username, password)
+            if u_info:
                 st.session_state.logged_in = True
-                st.session_state.role = "Administrador"
-                st.rerun()
-            elif username == "operador" and password == "123":
-                st.session_state.logged_in = True
-                st.session_state.role = "Operador"
+                st.session_state.username = u_info["username"]
+                st.session_state.nombre_completo = u_info["nombre_completo"]
+                st.session_state.role = u_info["rol"]
+                st.session_state.area_asignada = u_info["area_asignada"]
+                
+                registrar_auditoria(u_info["username"], "Inicio de Sesión", f"Usuario {u_info['nombre_completo']} ({u_info['rol']}) inició sesión.")
+                st.toast(f"Bienvenido {u_info['nombre_completo']}", icon="👋")
                 st.rerun()
             else:
-                st.error("Credenciales incorrectas")
+                st.error("❌ Credenciales incorrectas o usuario inactivo.")
 
 def logout():
+    from utils.database import registrar_auditoria
+    if st.session_state.get("username"):
+        registrar_auditoria(st.session_state.username, "Cierre de Sesión", "Usuario cerró sesión de forma manual.")
     st.session_state.logged_in = False
     st.session_state.role = None
+    st.session_state.username = None
+    st.session_state.nombre_completo = None
     st.rerun()
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -103,7 +116,8 @@ def render_sidebar():
         """
         st.sidebar.markdown(logo_html, unsafe_allow_html=True)
         
-    role_icon = "🛡️" if st.session_state.role == "Administrador" else "👷"
+    user_display = st.session_state.get("nombre_completo") or st.session_state.get("username") or "Usuario"
+    role_icon = "🛡️" if st.session_state.role == "Administrador" else ("👑" if st.session_state.role == "Supervisor" else "👷")
     user_badge = f"""
     <div style="background:#1e1e1e;border-radius:8px;padding:8px 12px;margin-bottom:12px;
                 border-left:3px solid #EC2024;font-family:'Questrial',sans-serif;">
@@ -111,7 +125,10 @@ def render_sidebar():
             Usuario activo
         </span><br>
         <span style="font-size:0.95rem;color:#fff;font-weight:600;">
-            {role_icon} {st.session_state.role}
+            {role_icon} {user_display}
+        </span><br>
+        <span style="font-size:0.75rem;color:#aaa;">
+            Rol: {st.session_state.role}
         </span>
     </div>
     """
@@ -367,4 +384,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Force reload: 2026-08-06 09:32
+# Force reload: 2026-08-17 08:57

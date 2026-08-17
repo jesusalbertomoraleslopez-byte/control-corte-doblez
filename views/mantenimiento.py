@@ -814,14 +814,137 @@ def view_mantenimiento_admin():
     except Exception as err:
         st.warning(f"No se pudo consultar el historial de GitHub: {err}")
 
-def view_mantenimiento():
-    st.title("🛠️ 6. MANTENIMIENTO DEL SISTEMA")
+def view_gestion_usuarios():
+    st.markdown("### 👥 Administración de Usuarios y Seguridad")
+    st.markdown("Crea, modifica y gestiona las cuentas de acceso de Administradores, Supervisores y Operadores.")
     
-    tab_admin, tab_correc = st.tabs([
-        "🛠️ MANTENIMIENTO Y RESPALDOS",
+    from utils.database import (
+        get_todos_usuarios_db,
+        guardar_usuario_db,
+        cambiar_password_db,
+        registrar_auditoria
+    )
+    
+    # 1. Tabla de usuarios existentes
+    df_users = get_todos_usuarios_db()
+    if not df_users.empty:
+        st.markdown("#### 📋 Usuarios Registrados en Sistema")
+        st.dataframe(
+            df_users.rename(columns={
+                "username": "Usuario",
+                "nombre_completo": "Nombre Completo",
+                "rol": "Rol",
+                "area_asignada": "Área Asignada",
+                "activo": "Activo (1=Sí)",
+                "fecha_creacion": "Fecha Creación"
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("ℹ️ No hay usuarios registrados aún.")
+        
+    st.markdown("---")
+    
+    col_u1, col_u2 = st.columns([1.5, 1.5])
+    
+    with col_u1:
+        st.markdown("#### ➕ Crear o Editar Usuario")
+        with st.form("form_gestion_usuario"):
+            u_name = st.text_input("Nombre de Usuario (Login):", placeholder="ej. juan_corte")
+            u_full = st.text_input("Nombre Completo del Colaborador:", placeholder="ej. Juan Pérez (Operador Corte)")
+            u_role = st.selectbox("Rol en el Sistema:", ["Operador", "Supervisor", "Administrador"], index=0)
+            u_area = st.selectbox("Área Asignada:", ["Todas", "Corte", "Doblez", "Rebabeo", "Barrenado", "Pintura", "Liberado", "Empaque", "Ingeniería"], index=0)
+            u_pass = st.text_input("Contraseña:", type="password", help="Si estás editando un usuario existente y dejas este campo en blanco, la contraseña actual se conservará.")
+            u_act = st.checkbox("Usuario Activo", value=True)
+            
+            sub_user = st.form_submit_button("💾 Guardar Usuario", type="primary", use_container_width=True)
+            if sub_user:
+                if not u_name.strip() or not u_full.strip():
+                    st.error("⚠️ El nombre de usuario y nombre completo son obligatorios.")
+                else:
+                    guardar_usuario_db(u_name.strip(), u_pass, u_full.strip(), u_role, u_area, 1 if u_act else 0)
+                    registrar_auditoria(
+                        st.session_state.get("username", "admin"),
+                        "Gestión de Usuario",
+                        f"Usuario '{u_name.strip()}' ({u_full.strip()}) guardado con rol '{u_role}'."
+                    )
+                    st.success(f"✅ ¡Usuario `{u_name.strip()}` guardado exitosamente!")
+                    st.rerun()
+                    
+    with col_u2:
+        st.markdown("#### 🔑 Cambiar Mi Contraseña de Administrador")
+        st.caption(f"Usuario activo: **{st.session_state.get('username')}** ({st.session_state.get('nombre_completo')})")
+        
+        with st.form("form_cambiar_mi_pass"):
+            pass1 = st.text_input("Nueva Contraseña Maestra:", type="password")
+            pass2 = st.text_input("Confirmar Nueva Contraseña:", type="password")
+            sub_pass = st.form_submit_button("🔑 Actualizar Mi Contraseña", type="primary", use_container_width=True)
+            
+            if sub_pass:
+                if not pass1 or len(pass1.strip()) < 4:
+                    st.error("⚠️ La contraseña debe tener al menos 4 caracteres.")
+                elif pass1 != pass2:
+                    st.error("⚠️ Las contraseñas no coinciden.")
+                else:
+                    cambiar_password_db(st.session_state.username, pass1)
+                    registrar_auditoria(
+                        st.session_state.username,
+                        "Cambio de Contraseña",
+                        f"El Administrador '{st.session_state.username}' actualizó su contraseña maestra."
+                    )
+                    st.success("✅ ¡Tu contraseña maestra de Administrador ha sido actualizada exitosamente!")
+                    st.balloons()
+                    st.rerun()
+
+
+def view_bitacora_auditoria():
+    st.markdown("### 📜 Bitácora de Auditoría y Respaldos Automáticos")
+    st.markdown("Historial inalterable de ingresos de usuarios, cambios en la base de datos y respaldos del sistema.")
+    
+    from utils.database import (
+        get_bitacora_auditoria_db,
+        make_database_backup,
+        registrar_auditoria
+    )
+    
+    col_bak1, col_bak2 = st.columns([3, 1])
+    with col_bak1:
+        st.caption("Puedes generar una copia de seguridad manual en el servidor en cualquier momento antes de realizar importaciones masivas.")
+    with col_bak2:
+        if st.button("💾 Crear Backup Ahora", type="primary", use_container_width=True, key="btn_manual_backup"):
+            path_b = make_database_backup()
+            if path_b:
+                registrar_auditoria(st.session_state.get("username", "admin"), "Respaldo Manual", f"Copia de seguridad creada: {path_b}")
+                st.success(f"✅ Copia de respaldo guardada en servidor: `{path_b}`")
+            else:
+                st.error("Error al crear el respaldo.")
+                
+    st.markdown("---")
+    
+    df_audit = get_bitacora_auditoria_db(300)
+    if not df_audit.empty:
+        st.dataframe(df_audit, use_container_width=True, hide_index=True)
+    else:
+        st.info("ℹ️ No hay registros aún en la bitácora de auditoría.")
+
+
+def view_mantenimiento():
+    st.title("🛠️ 6. MANTENIMIENTO Y SEGURIDAD DEL SISTEMA")
+    
+    tab_users, tab_audit, tab_admin, tab_correc = st.tabs([
+        "👥 GESTIÓN DE USUARIOS Y SEGURIDAD",
+        "📜 BITÁCORA DE AUDITORÍA Y RESPALDOS",
+        "🛠️ MANTENIMIENTO DE BASE DE DATOS",
         "✏️ CORRECCIÓN DE AVANCES/RECHAZOS"
     ])
     
+    with tab_users:
+        view_gestion_usuarios()
+        
+    with tab_audit:
+        view_bitacora_auditoria()
+        
     with tab_admin:
         view_mantenimiento_admin()
         
