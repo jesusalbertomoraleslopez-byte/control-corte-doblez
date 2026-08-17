@@ -613,7 +613,173 @@ def generate_pdf_consumo_laminas(df_ofs, df_calibres, metadata):
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC'))
     ]))
 
-    elements.append(KeepTogether([firmas_heading, Spacer(1, 6), firmas_table]))
-
     doc.build(elements)
     return pdf_buffer.getvalue()
+
+
+# --- SISTEMA DE CONTROL E INVENTARIO DE LÁMINAS DISPONIBLES ---
+
+def fetch_inventario_laminas_db():
+    """
+    Consulta el inventario de láminas en Almacén.
+    Calcula dinámicamente:
+    - Stock Ingresado = (stock_inicial + entradas_adicionales)
+    - Consumo Acumulado = Total Hojas Cortadas en Piso
+    - Stock Disponible Actual = Stock Ingresado - Consumo Acumulado
+    - Estatus = 🟢 Suficiente, 🟡 Moderado, 🔴 Stock Bajo
+    """
+    conn = get_connection()
+    
+    mat_expr = """
+        CASE 
+            WHEN UPPER(COALESCE(o.of_number,'') || ' ' || COALESCE(o.po,'') || ' ' || COALESCE(o.proyecto,'') || ' ' || COALESCE(o.descripcion_pronest,'')) LIKE '%GALV%'
+            THEN COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 12') || ' Galvanizado'
+            ELSE COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 12') || ' ANSI 61'
+        END
+    """
+    
+    # Obtener consumo de hojas cortadas por calibre
+    query_corte = f"""
+        SELECT 
+            {mat_expr} as [material_calibre],
+            COUNT(DISTINCT a.nido || '_' || a.hoja) as [hojas_cortadas]
+        FROM avances a
+        LEFT JOIN ordenes o ON a.of_number = o.of_number
+        LEFT JOIN nidos n ON a.of_number = n.of_number AND a.nido = n.nido
+        WHERE a.area = 'Corte'
+        GROUP BY {mat_expr}
+    """
+    df_cortadas = pd.read_sql_query(query_corte, conn)
+    cortadas_map = df_cortadas.set_index("material_calibre")["hojas_cortadas"].to_dict() if not df_cortadas.empty else {}
+    
+    # Obtener inventarios guardados
+    try:
+        df_inv = pd.read_sql_query("SELECT material_calibre, stock_inicial, entradas_adicionales, stock_minimo, fecha_actualizacion FROM inventario_laminas", conn)
+    except Exception:
+        df_inv = pd.DataFrame()
+        
+    conn.close()
+    
+    # Lista de todos los calibres conocidos (de inventario + de cortes)
+    todos_calibres = set(list(cortadas_map.keys()) + (df_inv["material_calibre"].tolist() if not df_inv.empty else []))
+    
+    # Calibres estándar por defecto si la base está vacía
+    if not todos_calibres:
+        todos_calibres = {"Cal 12 Galvanizado", "Cal 14 Galvanizado", "Cal 12 ANSI 61", "Cal 14 ANSI 61", "Cal 16 ANSI 61"}
+        
+    inv_dict = df_inv.set_index("material_calibre").to_dict(orient="index") if not df_inv.empty else {}
+    
+    rows = []
+    total_ingresado_global = 0
+    total_cortadas_global = 0
+    total_disponible_global = 0
+    alertas_stock_bajo = 0
+    
+    for mat in sorted(list(todos_calibres)):
+        info = inv_dict.get(mat, {})
+        stk_ini = int(info.get("stock_inicial", 0))
+        ent_adi = int(info.get("entradas_adicionales", 0))
+        stk_min = int(info.get("stock_minimo", 10))
+        dt_upd = info.get("fecha_actualizacion", "-")
+        
+        corte_cnt = int(cortadas_map.get(mat, 0))
+        stk_ingresado = stk_ini + ent_adi
+        stk_disp = stk_ingresado - corte_cnt
+        
+        if stk_disp <= stk_min:
+            estatus_txt = "🔴 Stock Bajo / Reorden"
+            alertas_stock_bajo += 1
+        elif stk_disp <= (stk_min * 2):
+            estatus_txt = "🟡 Stock Moderado"
+        else:
+            estatus_txt = "🟢 Stock Suficiente"
+            
+        total_ingresado_global += stk_ingresado
+        total_cortadas_global += corte_cnt
+        total_disponible_global += stk_disp
+        
+        rows.append({
+            "Material / Calibre": mat,
+            "Stock Inicial": stk_ini,
+            "Entradas Almacén": ent_adi,
+            "Total Ingresado": stk_ingresado,
+            "Hojas Cortadas (Consumo)": corte_cnt,
+            "Stock Disponible Actual": stk_disp,
+            "Stock Mínimo Alerta": stk_min,
+            "Estatus Stock": estatus_txt,
+            "Última Actualización": dt_upd
+        })
+        
+    df_result = pd.DataFrame(rows)
+    
+    metadata_inv = {
+        "total_ingresado": total_ingresado_global,
+        "total_cortadas": total_cortadas_global,
+        "total_disponible": total_disponible_global,
+        "total_materiales": len(rows),
+        "alertas_stock_bajo": alertas_stock_bajo
+    }
+    
+    return df_result, metadata_inv
+
+def guardar_ajuste_inventario_db(material_calibre, stock_inicial, entradas_adicionales=0, stock_minimo=10, usuario_log="admin"):
+    """Guarda o actualiza el stock inicial y parámetros de inventario para un calibre."""
+    from utils.database import save_db_to_excel, git_sync_db, registrar_auditoria
+    conn = get_connection()
+    c = conn.cursor()
+    now_str = get_local_now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    try:
+        c.execute("""
+            INSERT INTO inventario_laminas (material_calibre, stock_inicial, entradas_adicionales, stock_minimo, fecha_actualizacion)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(material_calibre) DO UPDATE SET
+                stock_inicial = ?,
+                entradas_adicionales = ?,
+                stock_minimo = ?,
+                fecha_actualizacion = ?
+        """, (material_calibre, stock_inicial, entradas_adicionales, stock_minimo, now_str,
+              stock_inicial, entradas_adicionales, stock_minimo, now_str))
+        conn.commit()
+        registrar_auditoria(
+            usuario_log,
+            "Ajuste Inventario Lámina",
+            f"Material '{material_calibre}': Stock Inicial={stock_inicial}, Entradas={entradas_adicionales}, Mínimo={stock_minimo}"
+        )
+    except Exception as e:
+        print(f"Error al guardar ajuste de inventario: {e}")
+    save_db_to_excel(conn)
+    conn.close()
+    git_sync_db()
+
+def fetch_movimientos_laminas_db():
+    """Consulta la bitácora detallada de movimientos de corte de láminas."""
+    conn = get_connection()
+    mat_expr = """
+        CASE 
+            WHEN UPPER(COALESCE(o.of_number,'') || ' ' || COALESCE(o.po,'') || ' ' || COALESCE(o.proyecto,'') || ' ' || COALESCE(o.descripcion_pronest,'')) LIKE '%GALV%'
+            THEN COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 12') || ' Galvanizado'
+            ELSE COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 12') || ' ANSI 61'
+        END
+    """
+    query = f"""
+        SELECT 
+            a.timestamp as [Fecha/Hora],
+            a.of_number as [OF],
+            a.nido as [Nido],
+            a.hoja as [Hoja #],
+            {mat_expr} as [Material / Calibre],
+            a.operador as [Operador],
+            a.maquina as [Máquina],
+            -1 as [Consumo (Lámina)]
+        FROM avances a
+        LEFT JOIN ordenes o ON a.of_number = o.of_number
+        LEFT JOIN nidos n ON a.of_number = n.of_number AND a.nido = n.nido
+        WHERE a.area = 'Corte'
+        GROUP BY a.of_number, a.nido, a.hoja
+        ORDER BY a.timestamp DESC
+    """
+    df_movs = pd.read_sql_query(query, conn)
+    conn.close()
+    return df_movs
+

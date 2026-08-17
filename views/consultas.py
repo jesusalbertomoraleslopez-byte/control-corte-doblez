@@ -1538,174 +1538,293 @@ def view_consultas():
 
 
 def view_vale_consumo_laminas():
-    st.markdown("### 📜 Vale y Reporte Oficial de Consumo de Láminas (Almacén)")
-    st.markdown(
-        """
-        Esta sección permite generar el **Vale de Consumo de Láminas Cortadas** para la descarga oficial de inventario en Almacén.
-        Sigue el flujo de **3 pasos** para seleccionar la fecha/semana, revisar los consumos e imprimir o descargar tus reportes en **Excel (Multi-hoja)**, **Borrador de Correo (.eml)** o **PDF Firmable**.
-        """
-    )
-    st.markdown("---")
+    st.markdown("### 📜 Vale y Control de Inventario de Láminas (Almacén)")
+    st.markdown("Generación de vales de consumo, monitoreo de stock disponible en Almacén, entradas de material e historial de salidas por corte.")
     
     from utils.reporte_consumo import (
         fetch_reporte_consumo_laminas,
         generate_excel_consumo_laminas,
         generate_eml_consumo_laminas,
-        generate_pdf_consumo_laminas
+        generate_pdf_consumo_laminas,
+        fetch_inventario_laminas_db,
+        guardar_ajuste_inventario_db,
+        fetch_movimientos_laminas_db
     )
     from utils.database import get_connection, get_local_today
     import datetime
-    
-    # PASO 1: SELECCIÓN DE RANGO Y FILTROS
-    st.markdown("#### 1️⃣ PASO 1: Seleccionar Período de Consumo y Filtros")
-    
-    col_p1, col_p2, col_p3 = st.columns([1.5, 1.5, 1.5])
-    
-    with col_p1:
-        preset_sel = st.selectbox(
-            "Selección Rápida de Período:",
-            ["Semana Actual (Lun - Dom)", "Semana Anterior", "Hoy", "Ayer", "Últimos 7 Días", "Rango Personalizado"],
-            index=0
+    import plotly.express as px
+    import pandas as pd
+
+    subtab_vale, subtab_dash, subtab_ajuste, subtab_movs = st.tabs([
+        "📜 Vale y Entregables (Excel / EML / PDF)",
+        "📊 Dashboard de Inventario de Lámina",
+        "⚙️ Ajustar Inventario de Almacén",
+        "📜 Movimientos de Lámina Cortada"
+    ])
+
+    # --- SUBTAB 1: VALES Y ENTREGABLES ---
+    with subtab_vale:
+        # PASO 1: SELECCIÓN DE RANGO Y FILTROS
+        st.markdown("#### 1️⃣ PASO 1: Seleccionar Período de Consumo y Filtros")
+        
+        col_p1, col_p2, col_p3 = st.columns([1.5, 1.5, 1.5])
+        
+        with col_p1:
+            preset_sel = st.selectbox(
+                "Selección Rápida de Período:",
+                ["Semana Actual (Lun - Dom)", "Semana Anterior", "Hoy", "Ayer", "Últimos 7 Días", "Rango Personalizado"],
+                index=0
+            )
+            
+        today = get_local_today()
+        if preset_sel == "Hoy":
+            f_ini, f_fin = today, today
+        elif preset_sel == "Ayer":
+            f_ini, f_fin = today - datetime.timedelta(days=1), today - datetime.timedelta(days=1)
+        elif preset_sel == "Semana Actual (Lun - Dom)":
+            f_ini = today - datetime.timedelta(days=today.weekday())
+            f_fin = f_ini + datetime.timedelta(days=6)
+        elif preset_sel == "Semana Anterior":
+            f_ini = today - datetime.timedelta(days=today.weekday() + 7)
+            f_fin = f_ini + datetime.timedelta(days=6)
+        elif preset_sel == "Últimos 7 Días":
+            f_ini = today - datetime.timedelta(days=6)
+            f_fin = today
+        else:
+            f_ini = today - datetime.timedelta(days=7)
+            f_fin = today
+            
+        with col_p2:
+            if preset_sel == "Rango Personalizado":
+                fecha_inicio_val = st.date_input("Fecha Inicial:", f_ini)
+                fecha_fin_val = st.date_input("Fecha Final:", f_fin)
+            else:
+                st.info(f"📅 Desde **{f_ini.strftime('%d/%m/%Y')}** hasta **{f_fin.strftime('%d/%m/%Y')}**")
+                fecha_inicio_val = f_ini
+                fecha_fin_val = f_fin
+
+        # Obtener lista de calibres y OFs para filtros secundarios
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("""
+            SELECT DISTINCT 
+                CASE 
+                    WHEN UPPER(COALESCE(o.of_number,'') || ' ' || COALESCE(o.po,'') || ' ' || COALESCE(o.proyecto,'') || ' ' || COALESCE(o.descripcion_pronest,'')) LIKE '%GALV%'
+                    THEN COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 12') || ' Galvanizado'
+                    ELSE COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 12') || ' ANSI 61'
+                END
+            FROM avances a 
+            LEFT JOIN nidos n ON a.of_number=n.of_number AND a.nido=n.nido 
+            LEFT JOIN ordenes o ON a.of_number=o.of_number 
+            WHERE a.area='Corte'
+        """)
+        lista_calibres = ["Todos"] + sorted([r[0] for r in c.fetchall() if r[0]])
+        
+        c.execute("SELECT DISTINCT of_number FROM avances WHERE area='Corte' ORDER BY of_number ASC")
+        lista_ofs = ["Todas"] + [r[0] for r in c.fetchall() if r[0]]
+        conn.close()
+
+        with col_p3:
+            calibre_sel = st.selectbox("Filtrar por Calibre / Material:", lista_calibres, index=0)
+            of_sel = st.selectbox("Filtrar por Orden de Fabricación (OF):", lista_ofs, index=0)
+
+        st.markdown("---")
+
+        # PASO 2: VISTA PREVIA Y TABLAS DE RESUMEN
+        st.markdown("#### 2️⃣ PASO 2: Resumen y Consumo de Láminas en Pantalla")
+        
+        data_report = fetch_reporte_consumo_laminas(
+            fecha_inicio=fecha_inicio_val,
+            fecha_fin=fecha_fin_val,
+            calibre_filter=calibre_sel,
+            of_filter=of_sel
         )
         
-    today = get_local_today()
-    if preset_sel == "Hoy":
-        f_ini, f_fin = today, today
-    elif preset_sel == "Ayer":
-        f_ini, f_fin = today - datetime.timedelta(days=1), today - datetime.timedelta(days=1)
-    elif preset_sel == "Semana Actual (Lun - Dom)":
-        f_ini = today - datetime.timedelta(days=today.weekday())
-        f_fin = f_ini + datetime.timedelta(days=6)
-    elif preset_sel == "Semana Anterior":
-        f_ini = today - datetime.timedelta(days=today.weekday() + 7)
-        f_fin = f_ini + datetime.timedelta(days=6)
-    elif preset_sel == "Últimos 7 Días":
-        f_ini = today - datetime.timedelta(days=6)
-        f_fin = today
-    else:
-        f_ini = today - datetime.timedelta(days=7)
-        f_fin = today
+        df_ofs = data_report["df_ofs"]
+        df_calibres = data_report["df_calibres"]
+        df_fechas = data_report["df_fechas"]
+        df_detalle = data_report["df_detalle"]
+        meta = data_report["metadata"]
         
-    with col_p2:
-        if preset_sel == "Rango Personalizado":
-            fecha_inicio_val = st.date_input("Fecha Inicial:", f_ini)
-            fecha_fin_val = st.date_input("Fecha Final:", f_fin)
+        # 4 Tarjetas de Métricas KPI
+        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+        kpi1.metric("Total Hojas Cortadas", f"{meta['total_hojas']:,} Hojas", delta=f"Folio: {meta['folio']}")
+        kpi2.metric("Calibres Consumidos", f"{meta['total_calibres']} Tipos")
+        kpi3.metric("OFs Atendidas", f"{meta['total_ofs']} Órdenes")
+        kpi4.metric("Registros de Corte", f"{len(df_detalle)} Nidos")
+        
+        if df_ofs.empty:
+            st.warning(f"⚠️ No hay registros de corte de láminas para el período seleccionado ({meta['fecha_inicio']} a {meta['fecha_fin']}). Prueba ajustando el rango de fechas.")
         else:
-            st.info(f"📅 Desde **{f_ini.strftime('%d/%m/%Y')}** hasta **{f_fin.strftime('%d/%m/%Y')}**")
-            fecha_inicio_val = f_ini
-            fecha_fin_val = f_fin
+            tab_v1, tab_v2, tab_v3, tab_v4 = st.tabs([
+                "📋 Resumen por OF (Formato Almacén)",
+                "📊 Resumen por Material / Calibre",
+                "📅 Resumen por Fecha",
+                "🔍 Detalle por Nido / Hoja"
+            ])
+            
+            with tab_v1:
+                st.markdown("##### 📋 Resumen de Órdenes de Fabricación (Descarga de Almacén)")
+                st.dataframe(df_ofs, use_container_width=True, hide_index=True, height=350)
+                
+            with tab_v2:
+                st.markdown("##### 📊 Consolidado por Material / Calibre")
+                st.dataframe(df_calibres, use_container_width=True, hide_index=True, height=300)
+                
+            with tab_v3:
+                st.markdown("##### 📅 Consumo Diario de Hojas")
+                st.dataframe(df_fechas, use_container_width=True, hide_index=True, height=300)
+                
+            with tab_v4:
+                st.markdown("##### 🔍 Desglose Detallado de Hojas y Nidos Procesados")
+                st.dataframe(df_detalle, use_container_width=True, hide_index=True, height=350)
 
-    # Obtener lista de calibres y OFs para filtros secundarios
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT DISTINCT COALESCE(NULLIF(n.calibre, ''), NULLIF(o.calibre, ''), 'Cal 16') FROM avances a LEFT JOIN nidos n ON a.of_number=n.of_number AND a.nido=n.nido LEFT JOIN ordenes o ON a.of_number=o.of_number WHERE a.area='Corte'")
-    lista_calibres = ["Todos"] + sorted([r[0] for r in c.fetchall() if r[0]])
-    
-    c.execute("SELECT DISTINCT of_number FROM avances WHERE area='Corte' ORDER BY of_number ASC")
-    lista_ofs = ["Todas"] + [r[0] for r in c.fetchall() if r[0]]
-    conn.close()
+        st.markdown("---")
 
-    with col_p3:
-        calibre_sel = st.selectbox("Filtrar por Calibre / Material:", lista_calibres, index=0)
-        of_sel = st.selectbox("Filtrar por Orden de Fabricación (OF):", lista_ofs, index=0)
-
-    st.markdown("---")
-
-    # PASO 2: VISTA PREVIA Y TABLAS DE RESUMEN
-    st.markdown("#### 2️⃣ PASO 2: Resumen y Consumo de Láminas en Pantalla")
-    
-    data_report = fetch_reporte_consumo_laminas(
-        fecha_inicio=fecha_inicio_val,
-        fecha_fin=fecha_fin_val,
-        calibre_filter=calibre_sel,
-        of_filter=of_sel
-    )
-    
-    df_ofs = data_report["df_ofs"]
-    df_calibres = data_report["df_calibres"]
-    df_fechas = data_report["df_fechas"]
-    df_detalle = data_report["df_detalle"]
-    meta = data_report["metadata"]
-    
-    # 4 Tarjetas de Métricas KPI
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric("Total Hojas Cortadas", f"{meta['total_hojas']:,} Hojas", delta=f"Folio: {meta['folio']}")
-    kpi2.metric("Calibres Consumidos", f"{meta['total_calibres']} Tipos")
-    kpi3.metric("OFs Atendidas", f"{meta['total_ofs']} Órdenes")
-    kpi4.metric("Registros de Corte", f"{len(df_detalle)} Nidos")
-    
-    if df_ofs.empty:
-        st.warning(f"⚠️ No hay registros de corte de láminas para el período seleccionado ({meta['fecha_inicio']} a {meta['fecha_fin']}). Prueba ajustando el rango de fechas.")
-    else:
-        tab_v1, tab_v2, tab_v3, tab_v4 = st.tabs([
-            "📋 Resumen por OF (Formato Almacén)",
-            "📊 Resumen por Material / Calibre",
-            "📅 Resumen por Fecha",
-            "🔍 Detalle por Nido / Hoja"
-        ])
+        # PASO 3: GENERACIÓN Y DESCARGA DE ENTREGABLES
+        st.markdown("#### 3️⃣ PASO 3: Generación y Descarga de Entregables Oficiales")
         
-        with tab_v1:
-            st.markdown("##### 📋 Resumen de Órdenes de Fabricación (Descarga de Almacén)")
-            st.dataframe(df_ofs, use_container_width=True, hide_index=True, height=350)
+        if not df_ofs.empty:
+            excel_bytes = generate_excel_consumo_laminas(df_ofs, df_calibres, df_fechas, df_detalle, meta)
+            pdf_bytes = generate_pdf_consumo_laminas(df_ofs, df_calibres, meta)
+            eml_bytes = generate_eml_consumo_laminas(df_ofs, df_calibres, meta, excel_bytes=excel_bytes, pdf_bytes=pdf_bytes)
             
-        with tab_v2:
-            st.markdown("##### 📊 Consolidado por Material / Calibre")
-            st.dataframe(df_calibres, use_container_width=True, hide_index=True, height=300)
+            col_d1, col_d2, col_d3 = st.columns(3)
             
-        with tab_v3:
-            st.markdown("##### 📅 Consumo Diario de Hojas")
-            st.dataframe(df_fechas, use_container_width=True, hide_index=True, height=300)
-            
-        with tab_v4:
-            st.markdown("##### 🔍 Desglose Detallado de Hojas y Nidos Procesados")
-            st.dataframe(df_detalle, use_container_width=True, hide_index=True, height=350)
+            with col_d1:
+                st.download_button(
+                    label="📊 Descargar Reporte Excel Multi-Hoja (.xlsx)",
+                    data=excel_bytes,
+                    file_name=f"Reporte_Consumo_Laminas_{meta['folio']}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                    use_container_width=True
+                )
+                st.caption("Excel completo con 5 hojas: Resumen por OF, por Calibre, por Fecha, Detalle y Metadatos.")
+                
+            with col_d2:
+                st.download_button(
+                    label="✉️ Descargar Borrador de Correo (.eml)",
+                    data=eml_bytes,
+                    file_name=f"Notificacion_Consumo_Almacen_{meta['folio']}.eml",
+                    mime="message/rfc822",
+                    type="secondary",
+                    use_container_width=True
+                )
+                st.caption("Archivo de correo para abrir en Outlook/Thunderbird con formato HTML y adjuntos Excel+PDF.")
+                
+            with col_d3:
+                st.download_button(
+                    label="📄 Descargar Vale PDF Firmable (.pdf)",
+                    data=pdf_bytes,
+                    file_name=f"Vale_Oficial_Consumo_Laminas_{meta['folio']}.pdf",
+                    mime="application/pdf",
+                    type="secondary",
+                    use_container_width=True
+                )
+                st.caption("Documento impreso con sello corporativo SIGRAMA y cuadros de firma para Entrega y Almacén.")
+        else:
+            st.info("ℹ️ Para habilitar las descargas de Excel, Correo y PDF, selecciona un período con registros de consumo de láminas.")
 
-    st.markdown("---")
+    # --- SUBTAB 2: DASHBOARD DE INVENTARIO ---
+    with subtab_dash:
+        st.markdown("#### 📊 Dashboard de Inventario de Lámina Disponibles")
+        st.caption("Monitoreo en tiempo real del inventario físico en Almacén descontando automáticamente las láminas cortadas en piso.")
+        
+        df_inv, meta_inv = fetch_inventario_laminas_db()
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Láminas Disponibles Actuales", f"{meta_inv['total_disponible']:,} Hojas")
+        c2.metric("Total Hojas Ingresadas", f"{meta_inv['total_ingresado']:,} Hojas")
+        c3.metric("Consumo Acumulado (Corte)", f"{meta_inv['total_cortadas']:,} Hojas")
+        c4.metric("Alertas Stock Bajo", f"{meta_inv['alertas_stock_bajo']} Calibres", delta_color="inverse")
+        
+        st.markdown("---")
+        st.markdown("##### 📋 Estatus de Stock por Material / Calibre")
+        st.dataframe(
+            df_inv,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Material / Calibre": st.column_config.TextColumn("Material / Calibre", width=200),
+                "Stock Disponible Actual": st.column_config.NumberColumn("Stock Disponible", format="%d hojas"),
+                "Hojas Cortadas (Consumo)": st.column_config.NumberColumn("Consumidas (-)", format="%d hojas"),
+                "Total Ingresado": st.column_config.NumberColumn("Total Ingresado (+)", format="%d hojas"),
+                "Estatus Stock": st.column_config.TextColumn("Estatus Stock", width=180)
+            }
+        )
+        
+        if not df_inv.empty:
+            fig_inv = px.bar(
+                df_inv,
+                x="Material / Calibre",
+                y=["Stock Disponible Actual", "Hojas Cortadas (Consumo)"],
+                barmode="group",
+                title="<b>DISPONIBILIDAD VS CONSUMO DE LÁMINAS POR MATERIAL</b>",
+                color_discrete_sequence=["#28a745", "#EC2024"],
+                labels={"value": "Cantidad de Hojas", "variable": "Concepto"}
+            )
+            fig_inv.update_layout(height=380, margin=dict(t=40, b=10, l=10, r=10))
+            st.plotly_chart(fig_inv, use_container_width=True)
 
-    # PASO 3: GENERACIÓN Y DESCARGA DE ENTREGABLES
-    st.markdown("#### 3️⃣ PASO 3: Generación y Descarga de Entregables Oficiales")
-    
-    if not df_ofs.empty:
-        excel_bytes = generate_excel_consumo_laminas(df_ofs, df_calibres, df_fechas, df_detalle, meta)
-        pdf_bytes = generate_pdf_consumo_laminas(df_ofs, df_calibres, meta)
-        eml_bytes = generate_eml_consumo_laminas(df_ofs, df_calibres, meta, excel_bytes=excel_bytes, pdf_bytes=pdf_bytes)
+    # --- SUBTAB 3: AJUSTAR INVENTARIO DE ALMACÉN ---
+    with subtab_ajuste:
+        st.markdown("#### ⚙️ Ajustar Inventario Base y Entradas de Almacén")
+        st.caption("Establece el stock inicial de láminas disponibles en Almacén o agrega entradas de material recibido de proveedores.")
         
-        col_d1, col_d2, col_d3 = st.columns(3)
+        df_inv_cur, _ = fetch_inventario_laminas_db()
+        calibres_conocidos = df_inv_cur["Material / Calibre"].tolist() if not df_inv_cur.empty else []
+        for default_m in ["Cal 12 Galvanizado", "Cal 14 Galvanizado", "Cal 12 ANSI 61", "Cal 14 ANSI 61", "Cal 16 ANSI 61"]:
+            if default_m not in calibres_conocidos:
+                calibres_conocidos.append(default_m)
+                
+        with st.form("form_ajuste_inv_laminas"):
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                mat_op = st.selectbox("Seleccionar Material / Calibre a Ajustar:", calibres_conocidos + ["➕ Agregar Nuevo Material Libre"], index=0)
+                if mat_op == "➕ Agregar Nuevo Material Libre":
+                    mat_final = st.text_input("Escribe el Nombre del Nuevo Material / Calibre:", placeholder="ej. Cal 10 Galvanizado")
+                else:
+                    mat_final = mat_op
+                    
+                # Obtener valores actuales si ya existe
+                cur_info = df_inv_cur[df_inv_cur["Material / Calibre"] == mat_final] if (not df_inv_cur.empty and mat_final in df_inv_cur["Material / Calibre"].values) else pd.DataFrame()
+                val_ini = int(cur_info["Stock Inicial"].values[0]) if not cur_info.empty else 0
+                val_ent = int(cur_info["Entradas Almacén"].values[0]) if not cur_info.empty else 0
+                val_min = int(cur_info["Stock Mínimo Alerta"].values[0]) if not cur_info.empty else 10
+
+            with col_f2:
+                stk_ini_in = st.number_input("Stock Inicial Base (Láminas):", min_value=0, value=val_ini, step=1)
+                ent_adi_in = st.number_input("Entradas Adicionales de Almacén (Láminas):", min_value=0, value=val_ent, step=1)
+                stk_min_in = st.number_input("Stock Mínimo de Alerta (Láminas):", min_value=1, value=val_min, step=1)
+                
+            sub_inv = st.form_submit_button("💾 Guardar y Actualizar Inventario", type="primary", use_container_width=True)
+            if sub_inv:
+                if not mat_final or len(mat_final.strip()) == 0:
+                    st.error("⚠️ Debe especificar un nombre de material válido.")
+                else:
+                    user_log = st.session_state.get("username", "admin")
+                    guardar_ajuste_inventario_db(mat_final.strip(), stk_ini_in, ent_adi_in, stk_min_in, usuario_log=user_log)
+                    st.success(f"✅ ¡Inventario para `{mat_final.strip()}` actualizado correctamente!")
+                    st.rerun()
+
+    # --- SUBTAB 4: MOVIMIENTOS DE LÁMINA CORTADA ---
+    with subtab_movs:
+        st.markdown("#### 📜 Bitácora de Movimientos de Lámina Cortada (Salidas)")
+        st.caption("Registro cronológico individual de cada hoja procesada en la estación de Corte.")
         
-        with col_d1:
+        df_movs = fetch_movimientos_laminas_db()
+        if not df_movs.empty:
+            st.dataframe(df_movs, use_container_width=True, hide_index=True, height=400)
+            csv_movs = df_movs.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="📊 Descargar Reporte Excel Multi-Hoja (.xlsx)",
-                data=excel_bytes,
-                file_name=f"Reporte_Consumo_Laminas_{meta['folio']}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-                use_container_width=True
+                label="📥 Exportar Movimientos de Lámina a CSV",
+                data=csv_movs,
+                file_name=f"Movimientos_Corte_Laminas_{get_local_today().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
             )
-            st.caption("Excel completo con 5 hojas: Resumen por OF, por Calibre, por Fecha, Detalle y Metadatos.")
-            
-        with col_d2:
-            st.download_button(
-                label="✉️ Descargar Borrador de Correo (.eml)",
-                data=eml_bytes,
-                file_name=f"Notificacion_Consumo_Almacen_{meta['folio']}.eml",
-                mime="message/rfc822",
-                type="secondary",
-                use_container_width=True
-            )
-            st.caption("Archivo de correo para abrir en Outlook/Thunderbird con formato HTML listo para enviar.")
-            
-        with col_d3:
-            st.download_button(
-                label="📄 Descargar Vale PDF Firmable (.pdf)",
-                data=pdf_bytes,
-                file_name=f"Vale_Oficial_Consumo_Laminas_{meta['folio']}.pdf",
-                mime="application/pdf",
-                type="secondary",
-                use_container_width=True
-            )
-            st.caption("Documento impreso con sello corporativo SIGRAMA y cuadros de firma para Entrega y Almacén.")
-    else:
-        st.info("ℹ️ Para habilitar las descargas de Excel, Correo y PDF, selecciona un período con registros de consumo de láminas.")
+        else:
+            st.info("ℹ️ No se han registrado movimientos de corte de láminas aún.")
 
 
 def view_public_avance_diario():

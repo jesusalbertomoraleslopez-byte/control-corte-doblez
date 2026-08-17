@@ -60,7 +60,8 @@ def sync_and_push_db():
         "config_correos": ["clave"],
         "tarimas": ["tarima_id", "no_pieza", "of_number"],
         "usuarios": ["username"],
-        "bitacora_auditoria": ["id"]
+        "bitacora_auditoria": ["id"],
+        "inventario_laminas": ["material_calibre"]
     }
 
     if has_remote:
@@ -152,7 +153,7 @@ def save_db_to_excel(conn=None):
         conn = sqlite3.connect(TEMP_DB_PATH)
         close_at_end = True
         
-    tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas", "usuarios", "bitacora_auditoria"]
+    tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas", "usuarios", "bitacora_auditoria", "inventario_laminas"]
     temp_excel = "sigrama_database_temp.xlsx"
     try:
         with pd.ExcelWriter(temp_excel, engine='openpyxl') as writer:
@@ -212,7 +213,7 @@ def sync_excel_to_sqlite():
         excel_file = pd.ExcelFile(EXCEL_DB_PATH)
         sheets = excel_file.sheet_names
         
-        tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas", "usuarios", "bitacora_auditoria"]
+        tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas", "usuarios", "bitacora_auditoria", "inventario_laminas"]
         for t in tables:
             best_match = next((s for s in sheets if s.lower() == t.lower()), None)
             if best_match:
@@ -398,6 +399,17 @@ def init_db_schema(conn=None):
             usuario TEXT NOT NULL,
             accion TEXT NOT NULL,
             detalles TEXT
+        )
+    ''')
+    
+    # 11. Tabla de Inventario de Láminas
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS inventario_laminas (
+            material_calibre TEXT PRIMARY KEY,
+            stock_inicial INTEGER DEFAULT 0,
+            entradas_adicionales INTEGER DEFAULT 0,
+            stock_minimo INTEGER DEFAULT 10,
+            fecha_actualizacion TEXT NOT NULL
         )
     ''')
     
