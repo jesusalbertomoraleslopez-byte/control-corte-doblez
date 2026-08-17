@@ -1548,6 +1548,7 @@ def view_vale_consumo_laminas():
         generate_pdf_consumo_laminas,
         fetch_inventario_laminas_db,
         guardar_ajuste_inventario_db,
+        registrar_entrada_proveedor_db,
         fetch_movimientos_laminas_db
     )
     from utils.database import get_connection, get_local_today
