@@ -163,9 +163,12 @@ def save_db_to_excel(conn=None):
                     df = pd.DataFrame()
                 df.to_excel(writer, sheet_name=t, index=False)
         
-        if os.path.exists(EXCEL_DB_PATH):
-            os.remove(EXCEL_DB_PATH)
-        os.rename(temp_excel, EXCEL_DB_PATH)
+        shutil.copyfile(temp_excel, EXCEL_DB_PATH)
+        if os.path.exists(temp_excel):
+            try:
+                os.remove(temp_excel)
+            except:
+                pass
         
         # Actualizar mtime para evitar re-sincronizaciones locales innecesarias
         global _last_excel_mtime
