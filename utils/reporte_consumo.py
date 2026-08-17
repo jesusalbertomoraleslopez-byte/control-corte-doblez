@@ -623,12 +623,13 @@ def fetch_inventario_laminas_db():
     """
     Consulta el inventario de láminas en Almacén.
     Calcula dinámicamente:
-    - Stock Ingresado = (stock_inicial + entradas_adicionales)
-    - Consumo Acumulado = Total Hojas Cortadas en Piso
-    - Stock Disponible Actual = Stock Ingresado - Consumo Acumulado
+    - Stock Base Ingresado = (stock_inicial + entradas_adicionales)
+    - Consumo Post-Ajuste = Hojas cortadas DESPUÉS de la fecha del último conteo/actualización.
+    - Stock Disponible Actual = Stock Base Ingresado - Consumo Post-Ajuste
     - Estatus = 🟢 Suficiente, 🟡 Moderado, 🔴 Stock Bajo
     """
     conn = get_connection()
+    c = conn.cursor()
     
     mat_expr = """
         CASE 
@@ -638,37 +639,22 @@ def fetch_inventario_laminas_db():
         END
     """
     
-    # Obtener consumo de hojas cortadas por calibre
-    query_corte = f"""
-        SELECT 
-            {mat_expr} as [material_calibre],
-            COUNT(DISTINCT a.nido || '_' || a.hoja) as [hojas_cortadas]
-        FROM avances a
-        LEFT JOIN ordenes o ON a.of_number = o.of_number
-        LEFT JOIN nidos n ON a.of_number = n.of_number AND a.nido = n.nido
-        WHERE a.area = 'Corte'
-        GROUP BY {mat_expr}
-    """
-    df_cortadas = pd.read_sql_query(query_corte, conn)
-    cortadas_map = df_cortadas.set_index("material_calibre")["hojas_cortadas"].to_dict() if not df_cortadas.empty else {}
-    
     # Obtener inventarios guardados
     try:
         df_inv = pd.read_sql_query("SELECT material_calibre, stock_inicial, entradas_adicionales, stock_minimo, fecha_actualizacion FROM inventario_laminas", conn)
     except Exception:
         df_inv = pd.DataFrame()
         
-    conn.close()
+    inv_dict = df_inv.set_index("material_calibre").to_dict(orient="index") if not df_inv.empty else {}
     
-    # Lista de todos los calibres conocidos (de inventario + de cortes)
-    todos_calibres = set(list(cortadas_map.keys()) + (df_inv["material_calibre"].tolist() if not df_inv.empty else []))
+    # Obtener lista de todos los calibres que tienen cortes o están en el catálogo de órdenes/nidos
+    c.execute(f"SELECT DISTINCT {mat_expr} FROM avances a LEFT JOIN nidos n ON a.of_number=n.of_number AND a.nido=n.nido LEFT JOIN ordenes o ON a.of_number=o.of_number WHERE a.area='Corte'")
+    calibres_cortes = [r[0] for r in c.fetchall() if r[0]]
     
-    # Calibres estándar por defecto si la base está vacía
+    todos_calibres = set(calibres_cortes + (df_inv["material_calibre"].tolist() if not df_inv.empty else []))
     if not todos_calibres:
         todos_calibres = {"Cal 12 Galvanizado", "Cal 14 Galvanizado", "Cal 12 ANSI 61", "Cal 14 ANSI 61", "Cal 16 ANSI 61"}
         
-    inv_dict = df_inv.set_index("material_calibre").to_dict(orient="index") if not df_inv.empty else {}
-    
     rows = []
     total_ingresado_global = 0
     total_cortadas_global = 0
@@ -680,11 +666,38 @@ def fetch_inventario_laminas_db():
         stk_ini = int(info.get("stock_inicial", 0))
         ent_adi = int(info.get("entradas_adicionales", 0))
         stk_min = int(info.get("stock_minimo", 10))
-        dt_upd = info.get("fecha_actualizacion", "-")
+        dt_upd = str(info.get("fecha_actualizacion", "")) if info.get("fecha_actualizacion") else ""
         
-        corte_cnt = int(cortadas_map.get(mat, 0))
+        # Calcular cortes realizados DESPUÉS de la última fecha de actualización (dt_upd)
+        if dt_upd:
+            query_corte = f"""
+                SELECT COUNT(DISTINCT a.nido || '_' || a.hoja)
+                FROM avances a
+                LEFT JOIN ordenes o ON a.of_number = o.of_number
+                LEFT JOIN nidos n ON a.of_number = n.of_number AND a.nido = n.nido
+                WHERE a.area = 'Corte' AND ({mat_expr}) = ? AND a.timestamp >= ?
+            """
+            c.execute(query_corte, (mat, dt_upd))
+        else:
+            query_corte = f"""
+                SELECT COUNT(DISTINCT a.nido || '_' || a.hoja)
+                FROM avances a
+                LEFT JOIN ordenes o ON a.of_number = o.of_number
+                LEFT JOIN nidos n ON a.of_number = n.of_number AND a.nido = n.nido
+                WHERE a.area = 'Corte' AND ({mat_expr}) = ?
+            """
+            c.execute(query_corte, (mat,))
+            
+        r_c = c.fetchone()
+        corte_post = r_c[0] if r_c else 0
+        
+        # Conteo total histórico informativo
+        c.execute(f"SELECT COUNT(DISTINCT a.nido || '_' || a.hoja) FROM avances a LEFT JOIN ordenes o ON a.of_number = o.of_number LEFT JOIN nidos n ON a.of_number = n.of_number AND a.nido = n.nido WHERE a.area = 'Corte' AND ({mat_expr}) = ?", (mat,))
+        r_h = c.fetchone()
+        corte_total_hist = r_h[0] if r_h else 0
+        
         stk_ingresado = stk_ini + ent_adi
-        stk_disp = stk_ingresado - corte_cnt
+        stk_disp = stk_ingresado - corte_post
         
         if stk_disp <= stk_min:
             estatus_txt = "🔴 Stock Bajo / Reorden"
@@ -695,21 +708,23 @@ def fetch_inventario_laminas_db():
             estatus_txt = "🟢 Stock Suficiente"
             
         total_ingresado_global += stk_ingresado
-        total_cortadas_global += corte_cnt
+        total_cortadas_global += corte_post
         total_disponible_global += stk_disp
         
         rows.append({
             "Material / Calibre": mat,
-            "Stock Inicial": stk_ini,
-            "Entradas Almacén": ent_adi,
-            "Total Ingresado": stk_ingresado,
-            "Hojas Cortadas (Consumo)": corte_cnt,
+            "Stock Físico Actual": stk_ini,
+            "Entradas Adicionales": ent_adi,
+            "Total Hojas Ingresadas": stk_ingresado,
+            "Cortes Posteriores (-)": corte_post,
             "Stock Disponible Actual": stk_disp,
             "Stock Mínimo Alerta": stk_min,
             "Estatus Stock": estatus_txt,
-            "Última Actualización": dt_upd
+            "Último Conteo / Entrada": dt_upd if dt_upd else "Sin conteo inicial",
+            "Consumo Histórico Total": corte_total_hist
         })
         
+    conn.close()
     df_result = pd.DataFrame(rows)
     
     metadata_inv = {
@@ -723,7 +738,7 @@ def fetch_inventario_laminas_db():
     return df_result, metadata_inv
 
 def guardar_ajuste_inventario_db(material_calibre, stock_inicial, entradas_adicionales=0, stock_minimo=10, usuario_log="admin"):
-    """Guarda o actualiza el stock inicial y parámetros de inventario para un calibre."""
+    """Establece el conteo físico de inventario inicial. Resetea entradas y establece la fecha de snapshot a AHORA."""
     from utils.database import save_db_to_excel, git_sync_db, registrar_auditoria
     conn = get_connection()
     c = conn.cursor()
@@ -743,11 +758,44 @@ def guardar_ajuste_inventario_db(material_calibre, stock_inicial, entradas_adici
         conn.commit()
         registrar_auditoria(
             usuario_log,
-            "Ajuste Inventario Lámina",
-            f"Material '{material_calibre}': Stock Inicial={stock_inicial}, Entradas={entradas_adicionales}, Mínimo={stock_minimo}"
+            "Conteo Físico Inventario Lámina",
+            f"Material '{material_calibre}': Stock Inicial Físico={stock_inicial}, Entradas={entradas_adicionales}, Mínimo={stock_minimo}"
         )
     except Exception as e:
         print(f"Error al guardar ajuste de inventario: {e}")
+    save_db_to_excel(conn)
+    conn.close()
+    git_sync_db()
+
+def registrar_entrada_proveedor_db(material_calibre, cantidad_llegada, usuario_log="admin"):
+    """Suma hojas recibidas de proveedor a las entradas adicionales del material especificado."""
+    from utils.database import save_db_to_excel, git_sync_db, registrar_auditoria
+    conn = get_connection()
+    c = conn.cursor()
+    now_str = get_local_now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    try:
+        # Verificar si ya existe registro
+        c.execute("SELECT stock_inicial, entradas_adicionales, stock_minimo FROM inventario_laminas WHERE material_calibre = ?", (material_calibre,))
+        r = c.fetchone()
+        if r:
+            stk_ini, ent_cur, stk_min = r[0], r[1], r[2]
+            ent_new = ent_cur + cantidad_llegada
+            c.execute("UPDATE inventario_laminas SET entradas_adicionales = ? WHERE material_calibre = ?", (ent_new, material_calibre))
+        else:
+            c.execute("""
+                INSERT INTO inventario_laminas (material_calibre, stock_inicial, entradas_adicionales, stock_minimo, fecha_actualizacion)
+                VALUES (?, 0, ?, 10, ?)
+            """, (material_calibre, cantidad_llegada, now_str))
+            
+        conn.commit()
+        registrar_auditoria(
+            usuario_log,
+            "Entrada Lámina Proveedor",
+            f"Material '{material_calibre}': +{cantidad_llegada} láminas recibidas de proveedor."
+        )
+    except Exception as e:
+        print(f"Error al registrar entrada de proveedor: {e}")
     save_db_to_excel(conn)
     conn.close()
     git_sync_db()

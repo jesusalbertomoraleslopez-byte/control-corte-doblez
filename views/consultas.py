@@ -1769,8 +1769,15 @@ def view_vale_consumo_laminas():
 
     # --- SUBTAB 3: AJUSTAR INVENTARIO DE ALMACÉN ---
     with subtab_ajuste:
-        st.markdown("#### ⚙️ Ajustar Inventario Base y Entradas de Almacén")
-        st.caption("Establece el stock inicial de láminas disponibles en Almacén o agrega entradas de material recibido de proveedores.")
+        st.markdown("#### ⚙️ Gestión de Inventario Físico y Entradas de Almacén")
+        st.markdown(
+            """
+            Usa las opciones a continuación para mantener al día el stock de láminas:
+            - **Establecer Conteo Físico Actual**: Ingresa las láminas físicas disponibles hoy en Almacén. Los cortes futuros restarán automáticamente de este monto.
+            - **Registrar Entrada de Proveedor**: Suma láminas a tu stock cuando lleguen nuevos embarques de proveedores.
+            """
+        )
+        st.markdown("---")
         
         df_inv_cur, _ = fetch_inventario_laminas_db()
         calibres_conocidos = df_inv_cur["Material / Calibre"].tolist() if not df_inv_cur.empty else []
@@ -1778,34 +1785,49 @@ def view_vale_consumo_laminas():
             if default_m not in calibres_conocidos:
                 calibres_conocidos.append(default_m)
                 
-        with st.form("form_ajuste_inv_laminas"):
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                mat_op = st.selectbox("Seleccionar Material / Calibre a Ajustar:", calibres_conocidos + ["➕ Agregar Nuevo Material Libre"], index=0)
-                if mat_op == "➕ Agregar Nuevo Material Libre":
-                    mat_final = st.text_input("Escribe el Nombre del Nuevo Material / Calibre:", placeholder="ej. Cal 10 Galvanizado")
+        col_form1, col_form2 = st.columns(2)
+        
+        with col_form1:
+            st.markdown("##### 📦 1. Establecer Conteo Físico de Inventario")
+            st.caption("Punto de partida: los cortes futuros irán disminuyendo este conteo.")
+            
+            with st.form("form_conteo_fisico_inv"):
+                mat_op1 = st.selectbox("Seleccionar Material / Calibre:", calibres_conocidos + ["➕ Agregar Nuevo Material"], key="sel_mat_1")
+                if mat_op1 == "➕ Agregar Nuevo Material":
+                    mat_final1 = st.text_input("Nombre del Nuevo Material:", placeholder="ej. Cal 10 Galvanizado", key="txt_mat_1")
                 else:
-                    mat_final = mat_op
+                    mat_final1 = mat_op1
                     
-                # Obtener valores actuales si ya existe
-                cur_info = df_inv_cur[df_inv_cur["Material / Calibre"] == mat_final] if (not df_inv_cur.empty and mat_final in df_inv_cur["Material / Calibre"].values) else pd.DataFrame()
-                val_ini = int(cur_info["Stock Inicial"].values[0]) if not cur_info.empty else 0
-                val_ent = int(cur_info["Entradas Almacén"].values[0]) if not cur_info.empty else 0
-                val_min = int(cur_info["Stock Mínimo Alerta"].values[0]) if not cur_info.empty else 10
+                cur_info1 = df_inv_cur[df_inv_cur["Material / Calibre"] == mat_final1] if (not df_inv_cur.empty and mat_final1 in df_inv_cur["Material / Calibre"].values) else pd.DataFrame()
+                val_ini1 = int(cur_info1["Stock Físico Actual"].values[0]) if not cur_info1.empty else 0
+                val_min1 = int(cur_info1["Stock Mínimo Alerta"].values[0]) if not cur_info1.empty else 10
 
-            with col_f2:
-                stk_ini_in = st.number_input("Stock Inicial Base (Láminas):", min_value=0, value=val_ini, step=1)
-                ent_adi_in = st.number_input("Entradas Adicionales de Almacén (Láminas):", min_value=0, value=val_ent, step=1)
-                stk_min_in = st.number_input("Stock Mínimo de Alerta (Láminas):", min_value=1, value=val_min, step=1)
+                stk_ini_in1 = st.number_input("Inventario Físico Disponible (Hojas):", min_value=0, value=val_ini1, step=1, help="Punto de partida del conteo actual.")
+                stk_min_in1 = st.number_input("Stock Mínimo para Alerta (Hojas):", min_value=1, value=val_min1, step=1)
                 
-            sub_inv = st.form_submit_button("💾 Guardar y Actualizar Inventario", type="primary", use_container_width=True)
-            if sub_inv:
-                if not mat_final or len(mat_final.strip()) == 0:
-                    st.error("⚠️ Debe especificar un nombre de material válido.")
-                else:
+                sub_inv1 = st.form_submit_button("💾 Establacer Conteo Físico", type="primary", use_container_width=True)
+                if sub_inv1:
+                    if not mat_final1 or len(mat_final1.strip()) == 0:
+                        st.error("⚠️ Debe especificar un nombre de material válido.")
+                    else:
+                        user_log = st.session_state.get("username", "admin")
+                        guardar_ajuste_inventario_db(mat_final1.strip(), stk_ini_in1, entradas_adicionales=0, stock_minimo=stk_min_in1, usuario_log=user_log)
+                        st.success(f"✅ Conteo de inventario para `{mat_final1.strip()}` establecido en **{stk_ini_in1} hojas**. Los cortes desde AHORA descontarán de esta cantidad.")
+                        st.rerun()
+
+        with col_form2:
+            st.markdown("##### ➕ 2. Registrar Entrada de Láminas (Proveedor)")
+            st.caption("Suma láminas recién recibidas de embarques al stock existente.")
+            
+            with st.form("form_entrada_proveedor_inv"):
+                mat_final2 = st.selectbox("Seleccionar Material / Calibre Recibido:", calibres_conocidos, key="sel_mat_2")
+                cant_llegada = st.number_input("Cantidad de Láminas Recibidas (+):", min_value=1, value=50, step=1, help="Suma al inventario disponible actual.")
+                
+                sub_inv2 = st.form_submit_button("📥 Registrar Entrada de Material", type="secondary", use_container_width=True)
+                if sub_inv2:
                     user_log = st.session_state.get("username", "admin")
-                    guardar_ajuste_inventario_db(mat_final.strip(), stk_ini_in, ent_adi_in, stk_min_in, usuario_log=user_log)
-                    st.success(f"✅ ¡Inventario para `{mat_final.strip()}` actualizado correctamente!")
+                    registrar_entrada_proveedor_db(mat_final2, cant_llegada, usuario_log=user_log)
+                    st.success(f"🎉 ¡Se agregaron **+{cant_llegada} láminas** a `{mat_final2}`!")
                     st.rerun()
 
     # --- SUBTAB 4: MOVIMIENTOS DE LÁMINA CORTADA ---
