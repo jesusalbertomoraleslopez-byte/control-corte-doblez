@@ -1863,8 +1863,27 @@ def view_public_avance_diario():
             margin-top: 0px !important;
         }
         header {
-            visibility: hidden;
-            height: 0px;
+            background: transparent !important;
+            pointer-events: none !important;
+        }
+        [data-testid="collapsedControl"] {
+            visibility: visible !important;
+            display: flex !important;
+            pointer-events: auto !important;
+            z-index: 999999 !important;
+            top: 0.5rem !important;
+            left: 0.5rem !important;
+            background-color: #111111 !important;
+            color: #FFFFFF !important;
+            border-radius: 6px !important;
+            border: 1px solid #EC2024 !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+            padding: 4px !important;
+        }
+        [data-testid="collapsedControl"] button,
+        [data-testid="collapsedControl"] svg {
+            fill: #FFFFFF !important;
+            color: #FFFFFF !important;
         }
         </style>
         """,
@@ -2192,8 +2211,27 @@ def view_public_rotativo():
             margin-top: 0px !important;
         }
         header {
-            visibility: hidden;
-            height: 0px;
+            background: transparent !important;
+            pointer-events: none !important;
+        }
+        [data-testid="collapsedControl"] {
+            visibility: visible !important;
+            display: flex !important;
+            pointer-events: auto !important;
+            z-index: 999999 !important;
+            top: 0.5rem !important;
+            left: 0.5rem !important;
+            background-color: #111111 !important;
+            color: #FFFFFF !important;
+            border-radius: 6px !important;
+            border: 1px solid #EC2024 !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+            padding: 4px !important;
+        }
+        [data-testid="collapsedControl"] button,
+        [data-testid="collapsedControl"] svg {
+            fill: #FFFFFF !important;
+            color: #FFFFFF !important;
         }
         </style>
         """,
