@@ -292,6 +292,7 @@ def view_consultas():
         [
             "📅 Avance del Día", 
             "📊 Avance Semanal", 
+            "🔎 Consulta por N° Parte",
             "📜 Vale de Consumo (Láminas)",
             "🔍 Trazabilidad", 
             "📉 Calidad (Rechazos)",
@@ -303,7 +304,10 @@ def view_consultas():
         label_visibility="collapsed"
     )
 
-    if active_tab == "📜 Vale de Consumo (Láminas)":
+    if active_tab == "🔎 Consulta por N° Parte":
+        view_consulta_numero_parte()
+
+    elif active_tab == "📜 Vale de Consumo (Láminas)":
         view_vale_consumo_laminas()
 
     # --- PESTAÑA 1: Avance del Día ---
@@ -1848,6 +1852,236 @@ def view_vale_consumo_laminas():
             )
         else:
             st.info("ℹ️ No se han registrado movimientos de corte de láminas aún.")
+
+
+def view_consulta_numero_parte():
+    st.markdown("### 🔎 Consulta de Estatus y WIP por Número de Parte (Part Number)")
+    st.markdown(
+        """
+        Esta herramienta te permite buscar cualquier **Número de Parte / SKU** para identificar de inmediato en qué **Órdenes de Fabricación (OFs)** se encuentra, 
+        cuántas piezas han sido producidas y en qué estación física de trabajo (**WIP en Piso**) está el material.
+        """
+    )
+    st.markdown("---")
+    
+    conn = get_connection()
+    c = conn.cursor()
+    
+    # Obtener catálogo completo de piezas (no_pieza + nombre_pieza)
+    c.execute("""
+        SELECT DISTINCT p.no_pieza, MAX(p.nombre_pieza) as nombre_pieza
+        FROM piezas p
+        WHERE p.no_pieza IS NOT NULL AND p.no_pieza != ''
+        GROUP BY p.no_pieza
+        ORDER BY p.no_pieza ASC
+    """)
+    rows_piezas = c.fetchall()
+    conn.close()
+    
+    if not rows_piezas:
+        st.warning("⚠️ No se encontraron números de parte cargados en la base de datos.")
+        return
+        
+    opciones_dict = {f"{r[0]}  |  {r[1] if r[1] else r[0]}": r[0] for r in rows_piezas}
+    lista_opciones = list(opciones_dict.keys())
+    
+    col_s1, col_s2 = st.columns([3, 1])
+    with col_s1:
+        sel_label = st.selectbox(
+            "🔍 Buscar o Seleccionar Número de Parte / Descripción:",
+            options=lista_opciones,
+            index=0,
+            help="Escribe para filtrar por clave de pieza o descripción."
+        )
+    with col_s2:
+        num_parte_sel = opciones_dict[sel_label]
+        st.info(f"**N° Parte Seleccionado:**\n`{num_parte_sel}`")
+        
+    # Consultar detalle de OFs donde aparece el número de parte
+    conn = get_connection()
+    query_of_detail = """
+        SELECT 
+            p.of_number,
+            COALESCE(NULLIF(o.proyecto, ''), NULLIF(o.po, ''), '-') as proyecto,
+            p.nido,
+            p.no_pieza,
+            p.nombre_pieza,
+            (p.cantidad * COALESCE(n.hojas, 1)) as total_requeridas,
+            p.ruta
+        FROM piezas p
+        LEFT JOIN ordenes o ON p.of_number = o.of_number
+        LEFT JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+        WHERE p.no_pieza = ?
+        ORDER BY p.of_number ASC
+    """
+    df_part_ofs = pd.read_sql_query(query_of_detail, conn, params=(num_parte_sel,))
+    
+    # Consultar avances agrupados por OF, nido y area
+    query_avances = """
+        SELECT of_number, nido, area, SUM(cantidad) as avanzadas
+        FROM avances
+        WHERE no_pieza = ?
+        GROUP BY of_number, nido, area
+    """
+    df_avances_part = pd.read_sql_query(query_avances, conn, params=(num_parte_sel,))
+    
+    # Consultar historial completo de movimientos
+    query_historial = """
+        SELECT 'Avance' as Tipo, timestamp as [Fecha/Hora], of_number as OF, nido as Nido, area as Área, operador as Operador, maquina as Máquina, cantidad as Cantidad, '' as Motivo
+        FROM avances
+        WHERE no_pieza = ?
+        UNION ALL
+        SELECT 'Rechazo' as Tipo, timestamp as [Fecha/Hora], of_number as OF, nido as Nido, area as Área, operador as Operador, maquina as Máquina, cantidad as Cantidad, motivo as Motivo
+        FROM rechazos
+        WHERE no_pieza = ?
+        ORDER BY [Fecha/Hora] DESC
+    """
+    df_historial = pd.read_sql_query(query_historial, conn, params=(num_parte_sel, num_parte_sel))
+    conn.close()
+
+    if df_part_ofs.empty:
+        st.info(f"ℹ️ No hay registros de asignación en OFs para la pieza `{num_parte_sel}`.")
+        return
+        
+    av_map = {}
+    if not df_avances_part.empty:
+        for _, r in df_avances_part.iterrows():
+            key = (str(r['of_number']), str(r['nido']), str(r['area']))
+            av_map[key] = int(r['avanzadas'])
+
+    # Procesar la tabla por OF
+    tabla_ofs = []
+    tot_req_global = 0
+    tot_corte_global = 0
+    tot_rebabeo_global = 0
+    tot_doblez_global = 0
+    tot_barrenado_global = 0
+    tot_pintura_global = 0
+    tot_liberado_global = 0
+    
+    for _, row in df_part_ofs.iterrows():
+        of_num = str(row['of_number'])
+        nido_id = str(row['nido'])
+        req_cnt = int(row['total_requeridas'])
+        tot_req_global += req_cnt
+        
+        cnt_corte = av_map.get((of_num, nido_id, 'Corte'), 0)
+        cnt_rebabeo = av_map.get((of_num, nido_id, 'Rebabeo'), 0)
+        cnt_doblez = av_map.get((of_num, nido_id, 'Doblez'), 0)
+        cnt_barrenado = av_map.get((of_num, nido_id, 'Barrenado'), 0)
+        cnt_pintura = av_map.get((of_num, nido_id, 'Pintura'), 0)
+        cnt_liberado = av_map.get((of_num, nido_id, 'Liberado'), 0) + av_map.get((of_num, nido_id, 'Empaque'), 0)
+        
+        tot_corte_global += min(req_cnt, cnt_corte)
+        tot_rebabeo_global += min(req_cnt, cnt_rebabeo)
+        tot_doblez_global += min(req_cnt, cnt_doblez)
+        tot_barrenado_global += min(req_cnt, cnt_barrenado)
+        tot_pintura_global += min(req_cnt, cnt_pintura)
+        tot_liberado_global += min(req_cnt, cnt_liberado)
+        
+        # Determinar estación WIP actual
+        if cnt_liberado >= req_cnt and req_cnt > 0:
+            estatus_wip = "🟢 Liberado / Terminado"
+        elif cnt_pintura > 0:
+            estatus_wip = f"🟣 En Pintura ({cnt_pintura}/{req_cnt})"
+        elif cnt_barrenado > 0:
+            estatus_wip = f"🔩 En Barrenado ({cnt_barrenado}/{req_cnt})"
+        elif cnt_doblez > 0:
+            estatus_wip = f"📐 En Doblez ({cnt_doblez}/{req_cnt})"
+        elif cnt_rebabeo > 0:
+            estatus_wip = f"⚙️ En Rebabeo ({cnt_rebabeo}/{req_cnt})"
+        elif cnt_corte > 0:
+            estatus_wip = f"✂️ En Corte ({cnt_corte}/{req_cnt})"
+        else:
+            estatus_wip = "📄 Por Cortar (Programado)"
+            
+        pct_avance = round((cnt_liberado / req_cnt * 100), 1) if req_cnt > 0 else 0.0
+        
+        tabla_ofs.append({
+            "OF Number": of_num,
+            "Proyecto / PO": row['proyecto'],
+            "Nido": nido_id,
+            "Requeridas": req_cnt,
+            "Corte": f"{cnt_corte}/{req_cnt}",
+            "Rebabeo": f"{cnt_rebabeo}/{req_cnt}",
+            "Doblez": f"{cnt_doblez}/{req_cnt}",
+            "Barrenado": f"{cnt_barrenado}/{req_cnt}",
+            "Pintura": f"{cnt_pintura}/{req_cnt}",
+            "Liberado": f"{cnt_liberado}/{req_cnt}",
+            "% Avance": f"{pct_avance}%",
+            "📍 Estatus / WIP Actual": estatus_wip
+        })
+        
+    df_tabla_ofs = pd.DataFrame(tabla_ofs)
+    nombre_desc = df_part_ofs.iloc[0]['nombre_pieza']
+    pct_global = round((tot_liberado_global / tot_req_global * 100), 1) if tot_req_global > 0 else 0.0
+    
+    # Tarjetas KPI
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Número de Parte", num_parte_sel)
+    k2.metric("OFs Participantes", f"{len(df_part_ofs)} Órdenes")
+    k3.metric("Piezas Requeridas", f"{tot_req_global:,} Pzs")
+    k4.metric("Piezas Liberadas", f"{tot_liberado_global:,} Pzs")
+    k5.metric("% Avance Global", f"{pct_global}%")
+    
+    st.markdown(f"**Descripción del No. Parte:** `{nombre_desc}`")
+    st.markdown("---")
+    
+    st.markdown("#### 📋 1. Órdenes de Fabricación donde participa la Pieza y su Estatus WIP")
+    st.dataframe(df_tabla_ofs, use_container_width=True, hide_index=True)
+    
+    st.markdown("---")
+    col_g1, col_g2 = st.columns([1.5, 1])
+    
+    with col_g1:
+        st.markdown("#### 📊 2. Ubicación Física del Material en Piso (WIP)")
+        # Calcular cuantas piezas están en cada etapa física
+        wip_por_cortar = max(0, tot_req_global - tot_corte_global)
+        wip_rebabeo = max(0, tot_corte_global - tot_rebabeo_global)
+        wip_doblez = max(0, tot_rebabeo_global - tot_doblez_global)
+        wip_barrenado = max(0, tot_doblez_global - tot_barrenado_global)
+        wip_pintura = max(0, tot_barrenado_global - tot_pintura_global)
+        wip_liberado = tot_liberado_global
+        
+        df_dist_wip = pd.DataFrame([
+            {"Etapa": "📄 Por Cortar", "Piezas": wip_por_cortar},
+            {"Etapa": "✂️ Corte (Rebabeo)", "Piezas": wip_rebabeo},
+            {"Etapa": "⚙️ Rebabeo (Doblez)", "Piezas": wip_doblez},
+            {"Etapa": "📐 Doblez (Barrenado)", "Piezas": wip_barrenado},
+            {"Etapa": "🔩 Barrenado (Pintura)", "Piezas": wip_pintura},
+            {"Etapa": "🟢 Liberado / Almacén", "Piezas": wip_liberado}
+        ])
+        
+        import plotly.express as px
+        fig_wip = px.bar(
+            df_dist_wip,
+            x="Etapa",
+            y="Piezas",
+            color="Etapa",
+            title=f"<b>Ubicación del Material — Part Number {num_parte_sel}</b>",
+            text="Piezas",
+            color_discrete_sequence=["#A0AEC0", "#3182CE", "#ED8936", "#DD6B20", "#805AD5", "#38A169"]
+        )
+        fig_wip.update_layout(height=350, showlegend=False, margin=dict(t=40, b=10, l=10, r=10))
+        st.plotly_chart(fig_wip, use_container_width=True)
+        
+    with col_g2:
+        st.markdown("#### 📜 3. Historial de Avances y Movimientos")
+        if not df_historial.empty:
+            st.dataframe(df_historial, use_container_width=True, hide_index=True, height=320)
+        else:
+            st.info("ℹ️ No hay historial de movimientos registrados para esta pieza.")
+
+    # Exportación a CSV / Excel
+    st.markdown("---")
+    csv_data = df_tabla_ofs.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label=f"📊 Exportar Consulta de Parte {num_parte_sel} a CSV",
+        data=csv_data,
+        file_name=f"Consulta_Numero_Parte_{num_parte_sel}.csv",
+        mime="text/csv",
+        type="primary"
+    )
 
 
 def view_public_avance_diario():
