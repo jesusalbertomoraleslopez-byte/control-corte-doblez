@@ -232,7 +232,7 @@ def view_generador_of():
             return
 
         # Búsqueda inteligente de PO sugerida
-        po_sug, idx_sug = buscar_po_sugerida(of_nombre_sel, labels_po)
+        po_sug, idx_sug = buscar_po_sugerida(of_nombre_sel, labels_po, lookup_po)
 
         # Formulario de parámetros
         with st.expander("📝 Parámetros de la Orden de Fabricación (Hoja 'Orden')", expanded=True):
@@ -400,7 +400,7 @@ def view_generador_of():
 
                 try:
                     # Búsqueda automática de PO
-                    po_sug, _ = buscar_po_sugerida(of_nom, labels_po)
+                    po_sug, _ = buscar_po_sugerida(of_nom, labels_po, lookup_po)
                     wb, stats = generar_excel_of_pronest(target_f, params_orden={"orden_fab": of_nom, "po": po_sug})
                     excel_path = os.path.join(target_f, f"{of_nom}.xlsx")
                     

@@ -79,23 +79,50 @@ def obtener_opciones_po():
             }
     return labels, lookup, df_pos
 
-def buscar_po_sugerida(of_title, lookup_dict):
+def buscar_po_sugerida(of_title, labels_po=None, lookup_dict=None):
     """
     Busca si el título de la OF coincide con alguna PO o Proyecto del catálogo.
-    Retorna el label sugerido o None.
+    Retorna una tupla (po_sug, idx_sug).
     """
+    if labels_po is None and lookup_dict is None:
+        labels_po, lookup_dict, _ = obtener_opciones_po()
+    elif isinstance(labels_po, dict):
+        lookup_dict = labels_po
+        labels_po, _, _ = obtener_opciones_po()
+    elif lookup_dict is None:
+        _, lookup_dict, _ = obtener_opciones_po()
+
+    # Detección por regex en el nombre de la OF
+    po_detectada = ""
+    m_po = re.search(r'(PO\s*(\d+)|(\d{4}[-\s]\d{4})|(\d{7,10}))', of_title, re.IGNORECASE)
+    if m_po:
+        po_detectada = m_po.group(0).strip()
+
     if not of_title or not lookup_dict:
-        return None
+        return po_detectada, 0
+
     of_lower = of_title.lower()
-    for lbl, data in lookup_dict.items():
-        p_num = data.get("po", "")
-        if p_num and len(p_num) >= 5 and p_num in of_title:
-            return lbl
-    for lbl, data in lookup_dict.items():
-        proy = data.get("proyecto", "")
+    of_digits = re.sub(r'\D', '', of_title)
+
+    # 1. Búsqueda exacta por PO en el catálogo
+    for idx, lbl in enumerate(labels_po):
+        data = lookup_dict.get(lbl, {})
+        p_num = str(data.get("po", "")).strip()
+        p_digits = re.sub(r'\D', '', p_num)
+        if p_digits and len(p_digits) >= 5 and p_digits in of_digits:
+            return p_num, idx
+        if p_num and len(p_num) >= 4 and p_num.lower() in of_lower:
+            return p_num, idx
+
+    # 2. Búsqueda por Nombre de Proyecto
+    for idx, lbl in enumerate(labels_po):
+        data = lookup_dict.get(lbl, {})
+        proy = str(data.get("proyecto", "")).strip()
         if proy and len(proy) >= 4 and proy.lower() in of_lower:
-            return lbl
-    return None
+            p_num = str(data.get("po", "")).strip()
+            return (p_num if p_num else po_detectada), idx
+
+    return po_detectada, 0
 
 def analizar_carpeta_of(folder_path):
     """
