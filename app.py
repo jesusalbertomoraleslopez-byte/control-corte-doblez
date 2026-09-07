@@ -144,6 +144,7 @@ def render_sidebar():
         {"key": "planeacion",    "icon": "📅", "label": "Planeación de Corte",       "admin_only": False},
         None,  # separador
         {"key": "produccion",    "icon": "⚙️",  "label": "Control de Producción",   "admin_only": False},
+        {"key": "pronest_of",    "icon": "📑", "label": "Generador OF (ProNest)",  "admin_only": False},
         {"key": "manufactura",   "icon": "🤖", "label": "Manufactura Inteligente",  "admin_only": False},
         {"key": "entarimado",    "icon": "📦", "label": "Entarimado y Embarque",    "admin_only": False},
         None,  # separador
@@ -300,6 +301,7 @@ from views.dashboard_etiquetas import view_dashboard_etiquetas
 # --- Vistas Principales (imported from views/) ---
 
 from views.mantenimiento import view_mantenimiento
+from views.generador_of import view_generador_of
 
 def view_sgc():
     st.title("7. SGC (Sistema de Gestión de Calidad)")
@@ -372,6 +374,8 @@ def main():
             view_planeacion()
         elif choice == "produccion":
             view_produccion()
+        elif choice == "pronest_of":
+            view_generador_of()
         elif choice == "manufactura":
             view_manufactura()
         elif choice == "entarimado":

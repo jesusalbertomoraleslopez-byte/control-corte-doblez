@@ -680,6 +680,11 @@ def view_planeacion():
     elif active_tab == "📤 3.1 CARGA":
         st.markdown("### 📋 Paso 1: Cargar Plan de Producción")
 
+        st.info("💡 **¿Deseas generar y cargar automáticamente desde ProNest?** Utiliza el módulo **📑 Generador OF (ProNest)** para escanear `Z:\\14 - ORDENES DE FABRICACION`, autocompletar la PO y dar de alta la orden en 1 clic.")
+        if st.button("📑 Abrir Generador de OF (ProNest)", key="btn_ir_a_pronest_of"):
+            st.session_state.nav_choice = "pronest_of"
+            st.rerun()
+
         col_dl, col_info = st.columns([1, 2])
         with col_dl:
             try:
