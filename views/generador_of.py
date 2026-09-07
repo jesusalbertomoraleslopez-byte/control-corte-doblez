@@ -18,9 +18,9 @@ def view_generador_of():
     st.markdown('''
     <div style="background: linear-gradient(135deg, #1e1e1e 0%, #111111 100%); 
                 padding: 18px 24px; border-radius: 10px; border-left: 5px solid #EC2024; margin-bottom: 20px;">
-        <h2 style="font-family: 'Montserrat', sans-serif; color: white; margin: 0; font-size: 24px;">
+        <div style="font-family: 'Montserrat', sans-serif; color: #FFFFFF !important; margin: 0; font-size: 24px; font-weight: 700;">
             📑 Generador de Órdenes de Fabricación ProNest
-        </h2>
+        </div>
         <p style="font-family: 'Questrial', sans-serif; color: #bbb; margin: 5px 0 0 0; font-size: 14px;">
             Escaneo de carpetas en <code>Z:\\14 - ORDENES DE FABRICACION</code>, diagnóstico de reportes PDF, enlace con App de PO's y carga directa al sistema de producción.
         </p>
