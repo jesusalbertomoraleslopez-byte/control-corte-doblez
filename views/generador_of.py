@@ -164,7 +164,8 @@ def view_generador_of():
             "Piezas": "✅" if c["pieza_pdf"] else "❌",
             "Ruta": c["ruta"],
             "Completo": c["completo"],
-            "NombreOF": c["of_nombre"]
+            "NombreOF": c["of_nombre"],
+            "Subcarpeta": c.get("subcarpeta", "")
         })
 
     df_display = pd.DataFrame(filas_tabla)
@@ -189,7 +190,8 @@ def view_generador_of():
             "Piezas": st.column_config.TextColumn("Piezas", width="small", disabled=True),
             "Ruta": None,
             "Completo": None,
-            "NombreOF": None
+            "NombreOF": None,
+            "Subcarpeta": None
         },
         disabled=["Orden de Fabricación", "Diagnóstico PDFs", "Excel en Carpeta", "Resumen", "Nidos", "Piezas"],
         hide_index=True,
@@ -214,8 +216,11 @@ def view_generador_of():
         sel_row = seleccionados.iloc[0]
         of_nombre_sel = sel_row["NombreOF"]
         of_etiqueta_sel = sel_row["Orden de Fabricación"]
+        subcarpeta_sel = sel_row.get("Subcarpeta", "")
         target_folder = sel_row["Ruta"]
         es_completo = sel_row["Completo"]
+
+        nombre_of_sugerido = f"{of_nombre_sel} - {subcarpeta_sel}" if subcarpeta_sel else of_nombre_sel
 
         st.markdown(f"### 📂 Carpeta Activa: **`{of_etiqueta_sel}`**")
         st.caption(f"Ruta física: `{target_folder}`")
@@ -232,7 +237,7 @@ def view_generador_of():
             return
 
         # Búsqueda inteligente de PO sugerida
-        po_sug, idx_sug = buscar_po_sugerida(of_nombre_sel, labels_po, lookup_po)
+        po_sug, idx_sug = buscar_po_sugerida(nombre_of_sugerido, labels_po, lookup_po)
 
         # Formulario de parámetros
         with st.expander("📝 Parámetros de la Orden de Fabricación (Hoja 'Orden')", expanded=True):
@@ -252,7 +257,8 @@ def view_generador_of():
                 proyecto_cliente_sug = info_po.get("proyecto", "")
 
                 po_manual = st.text_input("PO / Referencia asignada:", value=po_val if po_val else po_sug)
-                proyecto_nombre = st.text_input("Nombre del Proyecto:", value=of_nombre_sel)
+                proyecto_nombre = st.text_input("Nombre del Proyecto:", value=nombre_of_sugerido)
+                orden_fab_input = st.text_input("Orden de Fabricación (ID en Base de Datos):", value=nombre_of_sugerido)
                 usuario_actual = st.session_state.get("nombre_completo", "BRYAN MANCINAS")
                 programador_val = st.text_input("Programador responsable:", value=usuario_actual if usuario_actual else "BRYAN MANCINAS")
 
@@ -261,7 +267,7 @@ def view_generador_of():
                     "Nombre del Proyecto de Cliente:",
                     value=proyecto_cliente_sug if proyecto_cliente_sug else "POR DEFINIR"
                 )
-                desc_pronest_val = st.text_input("Descripción OF ProNest:", value=of_nombre_sel)
+                desc_pronest_val = st.text_input("Descripción OF ProNest:", value=nombre_of_sugerido)
                 
                 c_cal, c_prio = st.columns(2)
                 with c_cal:
@@ -272,7 +278,7 @@ def view_generador_of():
         params_orden = {
             "nombre_proyecto": proyecto_nombre,
             "programador": programador_val,
-            "orden_fab": of_nombre_sel,
+            "orden_fab": orden_fab_input,
             "po": po_manual,
             "desc_pronest": desc_pronest_val,
             "calibre": calibre_val,
@@ -294,7 +300,9 @@ def view_generador_of():
             with st.spinner("Conciliando reportes PDF de ProNest y generando estructura de datos..."):
                 try:
                     wb, stats = generar_excel_of_pronest(target_folder, params_orden=params_orden)
-                    excel_filename = f"{of_nombre_sel}.xlsx"
+                    import re
+                    safe_name = re.sub(r'[\\/*?:"<>|]', '', orden_fab_input).strip()
+                    excel_filename = f"{safe_name}.xlsx"
                     excel_save_path = os.path.join(target_folder, excel_filename)
 
                     # Guardar archivo físico en la carpeta Z:\
@@ -395,14 +403,18 @@ def view_generador_of():
 
             for i, (_, row) in enumerate(seleccionados.iterrows()):
                 of_nom = row["NombreOF"]
+                sub_c = row.get("Subcarpeta", "")
+                of_efectivo = f"{of_nom} - {sub_c}" if sub_c else of_nom
                 target_f = row["Ruta"]
-                status_text.text(f"Procesando {i+1}/{len(seleccionados)}: {of_nom}...")
+                status_text.text(f"Procesando {i+1}/{len(seleccionados)}: {of_efectivo}...")
 
                 try:
+                    import re
+                    safe_name = re.sub(r'[\\/*?:"<>|]', '', of_efectivo).strip()
                     # Búsqueda automática de PO
-                    po_sug, _ = buscar_po_sugerida(of_nom, labels_po, lookup_po)
-                    wb, stats = generar_excel_of_pronest(target_f, params_orden={"orden_fab": of_nom, "po": po_sug})
-                    excel_path = os.path.join(target_f, f"{of_nom}.xlsx")
+                    po_sug, _ = buscar_po_sugerida(of_efectivo, labels_po, lookup_po)
+                    wb, stats = generar_excel_of_pronest(target_f, params_orden={"orden_fab": of_efectivo, "nombre_proyecto": of_efectivo, "po": po_sug})
+                    excel_path = os.path.join(target_f, f"{safe_name}.xlsx")
                     
                     with open(excel_path, "wb") as f_out:
                         f_out.write(stats["excel_bytes"])
@@ -410,14 +422,14 @@ def view_generador_of():
                     if cargar_en_db_batch:
                         fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d")
                         save_production_plan(
-                            of_number=of_nom,
-                            proyecto=of_nom,
+                            of_number=of_efectivo,
+                            proyecto=of_efectivo,
                             programador="SISTEMA PRO-NEST",
                             fecha=fecha_hoy,
                             df_nidos=stats["df_nidos"],
                             df_piezas=stats["df_piezas"],
                             po=po_sug,
-                            descripcion_pronest=of_nom,
+                            descripcion_pronest=of_efectivo,
                             calibre=stats.get("calibre", "Cal 12"),
                             prioridad=1,
                             proyecto_cliente="POR DEFINIR"

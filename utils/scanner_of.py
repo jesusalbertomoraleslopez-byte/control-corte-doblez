@@ -177,16 +177,19 @@ def escanear_directorio_ofs(base_dir=r"Z:\14 - ORDENES DE FABRICACION"):
             continue
             
         try:
-            subdirs = [d for d in os.listdir(full_p) if os.path.isdir(os.path.join(full_p, d))]
+            subdirs = [d for d in os.listdir(full_p) if os.path.isdir(os.path.join(full_p, d)) and d.lower() != 'nesteos']
         except Exception:
             subdirs = []
             
-        rev_subdirs = [d for d in subdirs if "revision" in d.lower()]
-        
-        if rev_subdirs:
-            for rd in sorted(rev_subdirs):
+        subdirs_con_reportes = []
+        for d in subdirs:
+            diag_sub = analizar_carpeta_of(os.path.join(full_p, d))
+            if diag_sub["resumen"] or diag_sub["nido"] or diag_sub["pieza"] or diag_sub["excel_existente"]:
+                subdirs_con_reportes.append((d, diag_sub))
+
+        if subdirs_con_reportes:
+            for rd, diag in sorted(subdirs_con_reportes, key=lambda x: x[0]):
                 target_path = os.path.join(full_p, rd)
-                diag = analizar_carpeta_of(target_path)
                 tiene_3_pdfs = bool(diag["resumen"] and diag["nido"] and diag["pieza"])
                 tiene_excel = bool(diag["excel_existente"])
                 resultados.append({
