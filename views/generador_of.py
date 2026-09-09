@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import datetime
 import pandas as pd
 import streamlit as st
@@ -27,12 +28,36 @@ def view_generador_of():
     </div>
     ''', unsafe_allow_html=True)
 
-    base_dir = r"Z:\14 - ORDENES DE FABRICACION"
+    CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
+    
+    def cargar_ruta():
+        default_dir = r"Z:\14 - ORDENES DE FABRICACION"
+        try:
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    saved = cfg.get("ruta_directorio", "").strip()
+                    if saved:
+                        return saved
+        except Exception:
+            pass
+        return default_dir
+
+    def guardar_ruta(nueva_ruta):
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump({"ruta_directorio": nueva_ruta}, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    base_dir = cargar_ruta()
     
     # Barra de herramientas superior
     c_top1, c_top2, c_top3 = st.columns([2, 1, 1])
     with c_top1:
         ruta_directorio = st.text_input("📁 Directorio de Órdenes de Fabricación:", value=base_dir)
+        if ruta_directorio != base_dir and ruta_directorio.strip():
+            guardar_ruta(ruta_directorio.strip())
     with c_top2:
         st.write("")
         st.write("")
