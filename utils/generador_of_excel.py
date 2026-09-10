@@ -104,9 +104,30 @@ def procesar_of_pronest(folder_path=None, pdf_resumen_bytes=None, pdf_nido_bytes
             parts = t.split("Material:", 1)
             material_cabezal = parts[1].strip().split("\n")[0].strip()
 
+    current_nido_num = 1
     for page_idx, page in enumerate(doc_nido):
-        nido_label = f"N{page_idx+1:02d}"
         blocks = page.get_text("blocks")
+
+        # Detectar si esta página inicia un nuevo nido o es continuación de páginas anteriores
+        has_nido_header = False
+        for b in blocks:
+            if b[1] < 150 and "Nido:" in b[4]:
+                has_nido_header = True
+                break
+
+        if has_nido_header:
+            for b in blocks:
+                if b[1] < 130 and "de" in b[4] and "ProNest" not in b[4] and "Detalle" not in b[4]:
+                    m = re.search(r'(\d+)\s+de\s+(\d+)', b[4])
+                    if m:
+                        current_nido_num = int(m.group(1))
+                        break
+                m_direct = re.search(r'Nido:\s*(\d+)', b[4], re.IGNORECASE)
+                if m_direct and b[1] < 150:
+                    current_nido_num = int(m_direct.group(1))
+                    break
+
+        nido_label = f"N{current_nido_num:02d}"
         for b in blocks:
             text = b[4].strip()
             lines = [l.strip() for l in text.split("\n") if l.strip()]
