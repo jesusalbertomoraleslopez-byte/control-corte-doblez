@@ -40,6 +40,20 @@ def check_login():
     if 'nombre_completo' not in st.session_state:
         st.session_state.nombre_completo = None
 
+    # Soporte SSO desde Concentradora SIGRAMA
+    try:
+        sso_token = st.query_params.get("sso_token")
+        sso_user = st.query_params.get("sso_user")
+        if sso_token == "SIGRAMA_AUTH_TOKEN" and sso_user:
+            st.session_state.logged_in = True
+            st.session_state.username = sso_user
+            st.session_state.nombre_completo = sso_user
+            sso_role = st.query_params.get("sso_role", "Usuario")
+            st.session_state.role = "admin" if sso_role == "Admin" else "operador"
+            st.session_state.area_asignada = "Todas" if sso_role == "Admin" else "Corte y Doblez"
+    except Exception:
+        pass
+
 def login():
     st.title("Acceso al Sistema - SIGRAMA")
     st.markdown("### Ingeniería que da resultados!!")
