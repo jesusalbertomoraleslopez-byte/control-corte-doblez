@@ -191,6 +191,303 @@ def generate_wip_table_excel(df: pd.DataFrame, of_number: str, area_seleccionada
     return buf.getvalue()
 
 
+def generate_corte_detalle_excel(of_number: str) -> bytes:
+    """Genera archivo Excel (.xlsx) con el Detalle de Piezas pendientes y terminadas en Corte."""
+    conn = get_connection()
+    if of_number == "Todas":
+        query_p = """
+            SELECT p.of_number, p.nido, p.no_pieza, p.nombre_pieza, p.cantidad, n.hojas, n.calibre
+            FROM piezas p
+            JOIN nidos n ON p.of_number=n.of_number AND p.nido=n.nido
+            ORDER BY p.of_number, p.nido, p.no_pieza
+        """
+        df_p = pd.read_sql_query(query_p, conn)
+        query_av = """
+            SELECT of_number, nido, COUNT(DISTINCT hoja) as hojas_cortadas
+            FROM avances
+            WHERE area='Corte' AND hoja IS NOT NULL
+            GROUP BY of_number, nido
+        """
+        df_av = pd.read_sql_query(query_av, conn)
+        merge_keys = ['of_number', 'nido']
+    else:
+        query_p = """
+            SELECT p.of_number, p.nido, p.no_pieza, p.nombre_pieza, p.cantidad, n.hojas, n.calibre
+            FROM piezas p
+            JOIN nidos n ON p.of_number=n.of_number AND p.nido=n.nido
+            WHERE p.of_number=?
+            ORDER BY p.nido, p.no_pieza
+        """
+        df_p = pd.read_sql_query(query_p, conn, params=(of_number,))
+        query_av = """
+            SELECT nido, COUNT(DISTINCT hoja) as hojas_cortadas
+            FROM avances
+            WHERE of_number=? AND area='Corte' AND hoja IS NOT NULL
+            GROUP BY nido
+        """
+        df_av = pd.read_sql_query(query_av, conn, params=(of_number,))
+        merge_keys = ['nido']
+    conn.close()
+
+    if df_p.empty:
+        df_m = pd.DataFrame()
+    else:
+        df_m = df_p.merge(df_av, on=merge_keys, how='left')
+        df_m['hojas_cortadas'] = df_m['hojas_cortadas'].fillna(0).astype(int)
+        df_m['hojas'] = df_m['hojas'].fillna(1).astype(int)
+        df_m['pzas_planeadas'] = df_m['cantidad'] * df_m['hojas']
+        df_m['pzas_cortadas'] = df_m['cantidad'] * df_m[['hojas', 'hojas_cortadas']].min(axis=1)
+        df_m['pzas_pendientes'] = df_m['pzas_planeadas'] - df_m['pzas_cortadas']
+        
+        def calc_estado(r):
+            if r['hojas_cortadas'] >= r['hojas']:
+                return "Terminado"
+            elif r['hojas_cortadas'] > 0:
+                return "En Proceso"
+            else:
+                return "Pendiente"
+        df_m['estado'] = df_m.apply(calc_estado, axis=1)
+
+    wb = openpyxl.Workbook()
+    
+    # Fuentes y estilos
+    title_font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
+    sub_font = Font(name="Calibri", size=10, italic=True, color="FFFFFF")
+    hdr_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+    data_font = Font(name="Calibri", size=10)
+    bold_font = Font(name="Calibri", size=10, bold=True)
+    tot_font = Font(name="Calibri", size=10, bold=True, color="111111")
+    
+    title_fill = PatternFill("solid", fgColor="111111")
+    red_banner = PatternFill("solid", fgColor="EC2024")
+    hdr_fill = PatternFill("solid", fgColor="222222")
+    tot_fill = PatternFill("solid", fgColor="E0E0E0")
+    
+    fill_term = PatternFill("solid", fgColor="D1ECF1")   # Azul suave
+    fill_pend = PatternFill("solid", fgColor="FFF3CD")   # Amarillo suave
+    fill_ok   = PatternFill("solid", fgColor="D4EDDA")   # Verde suave
+    alt_fill  = PatternFill("solid", fgColor="F9F9F9")
+    
+    font_term = Font(name="Calibri", size=10, bold=True, color="0C5460")
+    font_pend = Font(name="Calibri", size=10, bold=True, color="856404")
+    
+    center_align = Alignment(horizontal="center", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center")
+    
+    thin_border = Border(
+        left=Side(style="thin", color="D2D3D5"),
+        right=Side(style="thin", color="D2D3D5"),
+        top=Side(style="thin", color="D2D3D5"),
+        bottom=Side(style="thin", color="D2D3D5")
+    )
+    thick_bottom = Border(
+        left=Side(style="thin", color="D2D3D5"),
+        right=Side(style="thin", color="D2D3D5"),
+        top=Side(style="thin", color="D2D3D5"),
+        bottom=Side(style="medium", color="111111")
+    )
+
+    # HOJA 1: DETALLE POR NIDO Y PIEZA
+    ws1 = wb.active
+    ws1.title = "Detalle Nidos y Piezas"
+    
+    ws1.merge_cells("A1:K1")
+    c1 = ws1["A1"]
+    c1.value = "SIGRAMA — CONTROL DE CORTE LASER | DETALLE DE PIEZAS PENDIENTES Y TERMINADAS"
+    c1.font = title_font
+    c1.fill = title_fill
+    c1.alignment = center_align
+    ws1.row_dimensions[1].height = 28
+    
+    tot_plan = int(df_m['pzas_planeadas'].sum()) if not df_m.empty else 0
+    tot_cort = int(df_m['pzas_cortadas'].sum()) if not df_m.empty else 0
+    tot_pend = int(df_m['pzas_pendientes'].sum()) if not df_m.empty else 0
+    
+    ws1.merge_cells("A2:K2")
+    c2 = ws1["A2"]
+    now_str = get_local_now().strftime("%d/%m/%Y %H:%M")
+    c2.value = f"OF: {of_number}   |   Fecha: {now_str}   |   Planeadas: {tot_plan:,}   |   Terminadas: {tot_cort:,}   |   Pendientes: {tot_pend:,}"
+    c2.font = sub_font
+    c2.fill = red_banner
+    c2.alignment = center_align
+    ws1.row_dimensions[2].height = 20
+    ws1.row_dimensions[3].height = 8
+    
+    cols1 = [
+        ("of_number", "OF", 18, center_align),
+        ("nido", "Nido", 12, center_align),
+        ("no_pieza", "No. Pieza", 20, center_align),
+        ("nombre_pieza", "Descripción", 38, left_align),
+        ("hojas", "Hojas Req.", 12, center_align),
+        ("hojas_cortadas", "Hojas Cortadas", 14, center_align),
+        ("cantidad", "Pzas / Hoja", 12, center_align),
+        ("pzas_planeadas", "Total Planeadas", 15, center_align),
+        ("pzas_cortadas", "Pzas Terminadas", 15, center_align),
+        ("pzas_pendientes", "Pzas Pendientes", 15, center_align),
+        ("estado", "Estado", 14, center_align),
+    ]
+    
+    ws1.row_dimensions[4].height = 25
+    for c_i, (_, name, w, _) in enumerate(cols1, 1):
+        cell = ws1.cell(row=4, column=c_i, value=name)
+        cell.font = hdr_font
+        cell.fill = hdr_fill
+        cell.alignment = center_align
+        cell.border = thin_border
+        ws1.column_dimensions[get_column_letter(c_i)].width = w
+        
+    curr = 5
+    for _, r in df_m.iterrows():
+        ws1.row_dimensions[curr].height = 20
+        r_fill = alt_fill if curr % 2 == 0 else PatternFill("solid", fgColor="FFFFFF")
+        for c_i, (k, _, _, al) in enumerate(cols1, 1):
+            val = r.get(k, "")
+            cell = ws1.cell(row=curr, column=c_i, value=val)
+            cell.alignment = al
+            cell.border = thin_border
+            cell.fill = r_fill
+            cell.font = data_font
+            
+            if k == "pzas_planeadas":
+                cell.font = bold_font
+            elif k == "pzas_cortadas":
+                cell.fill = fill_term
+                cell.font = font_term
+            elif k == "pzas_pendientes":
+                if val > 0:
+                    cell.fill = fill_pend
+                    cell.font = font_pend
+            elif k == "estado":
+                if val == "Terminado":
+                    cell.fill = fill_ok
+                    cell.font = bold_font
+        curr += 1
+        
+    # Totales hoja 1
+    ws1.row_dimensions[curr].height = 22
+    ws1.cell(row=curr, column=1, value="TOTALES").font = tot_font
+    ws1.cell(row=curr, column=1).alignment = center_align
+    ws1.cell(row=curr, column=1).fill = tot_fill
+    ws1.cell(row=curr, column=1).border = thick_bottom
+    
+    for c_i in range(2, len(cols1) + 1):
+        cell = ws1.cell(row=curr, column=c_i)
+        cell.fill = tot_fill
+        cell.border = thick_bottom
+        k = cols1[c_i - 1][0]
+        if k in ["pzas_planeadas", "pzas_cortadas", "pzas_pendientes"]:
+            col_let = get_column_letter(c_i)
+            cell.value = f"=SUM({col_let}5:{col_let}{curr-1})"
+            cell.font = tot_font
+            cell.alignment = center_align
+
+    # HOJA 2: RESUMEN POR NÚMERO DE PARTE
+    if not df_m.empty:
+        ws2 = wb.create_sheet(title="Resumen por Parte")
+        
+        ws2.merge_cells("A1:H1")
+        c1 = ws2["A1"]
+        c1.value = f"SIGRAMA — RESUMEN DE CORTE POR NUMERO DE PARTE | {of_number}"
+        c1.font = title_font
+        c1.fill = title_fill
+        c1.alignment = center_align
+        ws2.row_dimensions[1].height = 28
+        
+        ws2.merge_cells("A2:H2")
+        c2 = ws2["A2"]
+        c2.value = f"Generado: {now_str}   |   Total de Partes Distintas: {df_m['no_pieza'].nunique()}"
+        c2.font = sub_font
+        c2.fill = red_banner
+        c2.alignment = center_align
+        ws2.row_dimensions[2].height = 20
+        ws2.row_dimensions[3].height = 8
+        
+        df_res = df_m.groupby(['of_number', 'no_pieza']).agg({
+            'nombre_pieza': 'first',
+            'pzas_planeadas': 'sum',
+            'pzas_cortadas': 'sum',
+            'pzas_pendientes': 'sum'
+        }).reset_index()
+        
+        df_res['avance_pct'] = df_res.apply(
+            lambda r: (r['pzas_cortadas'] / r['pzas_planeadas']) if r['pzas_planeadas'] > 0 else 0, axis=1
+        )
+        df_res['estado'] = df_res.apply(
+            lambda r: "Terminado" if r['pzas_pendientes'] == 0 else ("En Proceso" if r['pzas_cortadas'] > 0 else "Pendiente"), axis=1
+        )
+        
+        cols2 = [
+            ("of_number", "OF", 18, center_align),
+            ("no_pieza", "No. Pieza", 22, center_align),
+            ("nombre_pieza", "Descripción", 40, left_align),
+            ("pzas_planeadas", "Total Planeadas", 15, center_align),
+            ("pzas_cortadas", "Total Terminadas", 15, center_align),
+            ("pzas_pendientes", "Total Pendientes", 15, center_align),
+            ("avance_pct", "% Avance", 12, center_align),
+            ("estado", "Estado", 14, center_align)
+        ]
+        
+        ws2.row_dimensions[4].height = 25
+        for c_i, (_, name, w, _) in enumerate(cols2, 1):
+            cell = ws2.cell(row=4, column=c_i, value=name)
+            cell.font = hdr_font
+            cell.fill = hdr_fill
+            cell.alignment = center_align
+            cell.border = thin_border
+            ws2.column_dimensions[get_column_letter(c_i)].width = w
+            
+        curr2 = 5
+        for _, r in df_res.iterrows():
+            ws2.row_dimensions[curr2].height = 20
+            r_fill = alt_fill if curr2 % 2 == 0 else PatternFill("solid", fgColor="FFFFFF")
+            for c_i, (k, _, _, al) in enumerate(cols2, 1):
+                val = r.get(k, "")
+                cell = ws2.cell(row=curr2, column=c_i, value=val)
+                cell.alignment = al
+                cell.border = thin_border
+                cell.fill = r_fill
+                cell.font = data_font
+                
+                if k == "pzas_planeadas":
+                    cell.font = bold_font
+                elif k == "pzas_cortadas":
+                    cell.fill = fill_term
+                    cell.font = font_term
+                elif k == "pzas_pendientes":
+                    if val > 0:
+                        cell.fill = fill_pend
+                        cell.font = font_pend
+                elif k == "avance_pct":
+                    cell.number_format = '0.0%'
+                    cell.font = bold_font
+                elif k == "estado":
+                    if val == "Terminado":
+                        cell.fill = fill_ok
+                        cell.font = bold_font
+            curr2 += 1
+            
+        ws2.row_dimensions[curr2].height = 22
+        ws2.cell(row=curr2, column=1, value="TOTALES").font = tot_font
+        ws2.cell(row=curr2, column=1).alignment = center_align
+        ws2.cell(row=curr2, column=1).fill = tot_fill
+        ws2.cell(row=curr2, column=1).border = thick_bottom
+        
+        for c_i in range(2, len(cols2) + 1):
+            cell = ws2.cell(row=curr2, column=c_i)
+            cell.fill = tot_fill
+            cell.border = thick_bottom
+            k = cols2[c_i - 1][0]
+            if k in ["pzas_planeadas", "pzas_cortadas", "pzas_pendientes"]:
+                col_let = get_column_letter(c_i)
+                cell.value = f"=SUM({col_let}5:{col_let}{curr2-1})"
+                cell.font = tot_font
+                cell.alignment = center_align
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def view_avances():
     st.markdown("## 🏭 Panel de Operador - Registro de Avances")
     
@@ -340,6 +637,21 @@ def view_avances():
             """, unsafe_allow_html=True
         )
         
+        col_corte_dl, _ = st.columns([1, 1])
+        with col_corte_dl:
+            excel_corte_bytes = generate_corte_detalle_excel(of_number)
+            clean_of_c = re.sub(r'[^a-zA-Z0-9_-]', '_', of_number)
+            fecha_c_tag = get_local_now().strftime("%Y%m%d_%H%M")
+            st.download_button(
+                label="📥 Descargar Detalle de Piezas en Corte (.xlsx)",
+                data=excel_corte_bytes,
+                file_name=f"Detalle_Corte_{clean_of_c}_{fecha_c_tag}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                type="secondary",
+                key="btn_dl_corte_piezas_excel"
+            )
+
         # Toggle para cambiar a modo reposición
         modo_reposicion = st.checkbox("🔄 Registrar Reposiciones / Re-cuts (Piezas sueltas re-cortadas por Scrap)", key="corte_modo_reposicion")
         

@@ -164,7 +164,8 @@ def save_db_to_excel(conn=None):
                     df = pd.DataFrame()
                 df.to_excel(writer, sheet_name=t, index=False)
         
-        shutil.copyfile(temp_excel, EXCEL_DB_PATH)
+        if os.path.exists(temp_excel) and os.path.getsize(temp_excel) > 10000:
+            shutil.copyfile(temp_excel, EXCEL_DB_PATH)
         if os.path.exists(temp_excel):
             try:
                 os.remove(temp_excel)
@@ -172,8 +173,9 @@ def save_db_to_excel(conn=None):
                 pass
         
         # Actualizar mtime para evitar re-sincronizaciones locales innecesarias
-        global _last_excel_mtime
-        _last_excel_mtime = os.path.getmtime(EXCEL_DB_PATH)
+        if os.path.exists(EXCEL_DB_PATH):
+            global _last_excel_mtime
+            _last_excel_mtime = os.path.getmtime(EXCEL_DB_PATH)
     except Exception as e:
         print(f"Error al guardar base de datos a Excel: {e}")
         if os.path.exists(temp_excel):
@@ -189,22 +191,19 @@ def sync_excel_to_sqlite():
     """Carga los datos del archivo Excel sigrama_database.xlsx a la base SQLite temporal."""
     init_db_schema()
     
-    if not os.path.exists(EXCEL_DB_PATH):
-        # Si el Excel no existe, pero existe la base de datos vieja sigrama.db, migramos
-        if os.path.exists("sigrama.db"):
+    if not os.path.exists(EXCEL_DB_PATH) or os.path.getsize(EXCEL_DB_PATH) < 10000:
+        # Si el Excel no existe o es muy pequeño/corrupto, pero SQLite tiene datos, guardamos SQLite a Excel
+        if os.path.exists(TEMP_DB_PATH):
             try:
-                old_conn = sqlite3.connect("sigrama.db")
-                save_db_to_excel(old_conn)
-                old_conn.close()
-                # Renombramos para evitar migraciones repetidas
-                os.rename("sigrama.db", "sigrama_migrated.db")
-            except Exception as em:
-                print(f"Error al migrar DB vieja: {em}")
-                save_db_to_excel()
-        else:
-            # Si no hay ninguna BD, crear un Excel vacío inicial a partir del esquema
-            save_db_to_excel()
-            return
+                c_test = sqlite3.connect(TEMP_DB_PATH)
+                n_ord = c_test.execute("SELECT count(*) FROM ordenes").fetchone()[0]
+                c_test.close()
+                if n_ord > 0:
+                    save_db_to_excel()
+                    return
+            except Exception:
+                pass
+        return
         
     conn = sqlite3.connect(TEMP_DB_PATH)
     c = conn.cursor()
@@ -218,8 +217,8 @@ def sync_excel_to_sqlite():
             best_match = next((s for s in sheets if s.lower() == t.lower()), None)
             if best_match:
                 df = pd.read_excel(excel_file, sheet_name=best_match)
-                c.execute(f"DELETE FROM {t}")
                 if not df.empty:
+                    c.execute(f"DELETE FROM {t}")
                     # Reemplazar valores nulos por None para evitar errores en SQLite
                     df = df.astype(object).where(pd.notnull(df), None)
                     df.to_sql(t, conn, if_exists='append', index=False)

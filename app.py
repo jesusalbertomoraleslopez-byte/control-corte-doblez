@@ -406,4 +406,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Force reload: 2026-09-11 12:28 - WIP Excel Export Button Active
+# Force reload: 2026-09-11 13:09 - Corte Detalle Piezas Excel Button Active
