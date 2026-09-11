@@ -30,3 +30,9 @@ sigrama_backup*.db
 sigrama_temp.db
 sigrama_migrated.db
 sigrama_database_temp.xlsx
+sigrama_database_remote*.xlsx
+sigrama_database.db
+scratch/
+apply_timezone_shift.py
+inspect_timestamps.py
+pronest_files/
