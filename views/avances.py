@@ -1,6 +1,13 @@
 import streamlit as st
 import pandas as pd
-from utils.database import get_active_of, get_todas_piezas, get_avances_nido, save_avances_mixto, get_total_rechazos, get_connection, get_movimientos_area, get_all_ofs, get_personal_prenomina, get_operadores_por_area
+import io
+import re
+import datetime
+import openpyxl
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+from utils.database import get_active_of, get_todas_piezas, get_avances_nido, save_avances_mixto, get_total_rechazos, get_connection, get_movimientos_area, get_all_ofs, get_personal_prenomina, get_operadores_por_area, get_local_now
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode, JsCode
 
 # Constantes de diseño
@@ -10,6 +17,179 @@ GRAY = "#D2D3D5"
 WHITE = "#FFFFFF"
 
 PROCESSES = ["Ingenieria", "Corte", "Rebabeo", "Doblez", "Barrenado", "Pintura", "Liberado", "Empaque"]
+
+
+def generate_wip_table_excel(df: pd.DataFrame, of_number: str, area_seleccionada: str, total_wip: int = 0) -> bytes:
+    """Genera archivo Excel (.xlsx) con formato corporativo SIGRAMA para la tabla WIP del área."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"WIP {area_seleccionada[:25]}"
+    
+    # Fuentes y estilos
+    title_font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
+    subtitle_font = Font(name="Calibri", size=10, italic=True, color="FFFFFF")
+    hdr_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+    data_font = Font(name="Calibri", size=10)
+    data_bold = Font(name="Calibri", size=10, bold=True)
+    tot_font = Font(name="Calibri", size=10, bold=True, color="111111")
+    
+    # Fills
+    title_fill = PatternFill("solid", fgColor="111111")     # Negro corporativo
+    red_banner = PatternFill("solid", fgColor="EC2024")     # Rojo corporativo SIGRAMA
+    hdr_fill = PatternFill("solid", fgColor="222222")       # Gris oscuro cabecera
+    tot_fill = PatternFill("solid", fgColor="E0E0E0")       # Gris totalizador
+    
+    fill_wip = PatternFill("solid", fgColor="D4EDDA")       # Verde suave (WIP Disp)
+    fill_buenas = PatternFill("solid", fgColor="D1ECF1")    # Azul suave (Proc Buenas)
+    fill_malas = PatternFill("solid", fgColor="F8D7DA")     # Rojo suave (Proc Malas)
+    fill_tot_req = PatternFill("solid", fgColor="E9ECEF")   # Gris claro (Totales OF)
+    alt_fill = PatternFill("solid", fgColor="F9F9F9")       # Alternado suave
+    
+    # Colores de fuente para columnas específicas
+    font_proc_ant = Font(name="Calibri", size=10, bold=True, color="004085") # Azul oscuro
+    font_rech_ant = Font(name="Calibri", size=10, bold=True, color="721C24") # Rojo vino
+    font_pend_tot = Font(name="Calibri", size=10, bold=True, color="C82333") # Rojo alerta
+    font_wip_disp = Font(name="Calibri", size=10, bold=True, color="155724") # Verde oscuro
+    
+    # Alineaciones
+    center_align = Alignment(horizontal="center", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center")
+    
+    # Bordes
+    thin_border = Border(
+        left=Side(style="thin", color="D2D3D5"),
+        right=Side(style="thin", color="D2D3D5"),
+        top=Side(style="thin", color="D2D3D5"),
+        bottom=Side(style="thin", color="D2D3D5")
+    )
+    thick_bottom = Border(
+        left=Side(style="thin", color="D2D3D5"),
+        right=Side(style="thin", color="D2D3D5"),
+        top=Side(style="thin", color="D2D3D5"),
+        bottom=Side(style="medium", color="111111")
+    )
+    
+    # 1. Título y Banner superior
+    ws.merge_cells("A1:K1")
+    title_cell = ws["A1"]
+    title_cell.value = f"SIGRAMA — CONTROL DE PRODUCCION | WIP {area_seleccionada.upper()}"
+    title_cell.font = title_font
+    title_cell.fill = title_fill
+    title_cell.alignment = center_align
+    ws.row_dimensions[1].height = 28
+    
+    ws.merge_cells("A2:K2")
+    sub_cell = ws["A2"]
+    now_str = get_local_now().strftime("%d/%m/%Y %H:%M")
+    sub_cell.value = f"OF: {of_number}   |   Fecha de Reporte: {now_str}   |   Total Piezas WIP Disponibles: {int(total_wip):,}"
+    sub_cell.font = subtitle_font
+    sub_cell.fill = red_banner
+    sub_cell.alignment = center_align
+    ws.row_dimensions[2].height = 20
+    
+    # Fila vacía de separación
+    ws.row_dimensions[3].height = 8
+    
+    # 2. Encabezados de Columnas (Fila 4)
+    cols_def = [
+        ("of_number", "OF", 18, center_align),
+        ("no_pieza", "No. Pieza", 20, center_align),
+        ("nombre_pieza", "Descripción", 38, left_align),
+        ("total_requeridas", "Totales (OF)", 14, center_align),
+        ("Pendiente Disponible", "WIP Disp.", 14, center_align),
+        ("terminadas_ant", "Proc. Ant.", 13, center_align),
+        ("rechazadas_ant", "Rech. Ant.", 13, center_align),
+        ("Terminadas", "Proc. Buenas", 14, center_align),
+        ("Rechazos", "Proc. Malas", 13, center_align),
+        ("Motivo", "Motivo de rechazo", 24, left_align),
+        ("Pendiente Total OF", "Pend. Total", 14, center_align),
+    ]
+    
+    header_row = 4
+    ws.row_dimensions[header_row].height = 25
+    for col_idx, (_, col_name, col_width, _) in enumerate(cols_def, 1):
+        cell = ws.cell(row=header_row, column=col_idx, value=col_name)
+        cell.font = hdr_font
+        cell.fill = hdr_fill
+        cell.alignment = center_align
+        cell.border = thin_border
+        ws.column_dimensions[get_column_letter(col_idx)].width = col_width
+
+    # 3. Filas de Datos
+    curr_row = 5
+    for _, r in df.iterrows():
+        ws.row_dimensions[curr_row].height = 20
+        row_fill = alt_fill if curr_row % 2 == 0 else PatternFill("solid", fgColor="FFFFFF")
+        
+        for col_idx, (field_key, _, _, align_style) in enumerate(cols_def, 1):
+            val = r.get(field_key, "")
+            
+            # Cast numéricos a int para que las fórmulas de suma funcionen
+            if field_key in ["total_requeridas", "Pendiente Disponible", "terminadas_ant", "rechazadas_ant", "Terminadas", "Rechazos", "Pendiente Total OF"]:
+                try:
+                    val = int(val) if pd.notna(val) and val != "" else 0
+                except:
+                    val = 0
+            elif pd.isna(val):
+                val = ""
+                
+            cell = ws.cell(row=curr_row, column=col_idx, value=val)
+            cell.alignment = align_style
+            cell.border = thin_border
+            cell.fill = row_fill
+            cell.font = data_font
+            
+            # Estilos condicionales por columna según AgGrid
+            if field_key == "total_requeridas":
+                cell.fill = fill_tot_req
+                cell.font = data_bold
+            elif field_key == "Pendiente Disponible":
+                cell.fill = fill_wip
+                cell.font = font_wip_disp
+            elif field_key == "terminadas_ant":
+                cell.font = font_proc_ant
+            elif field_key == "rechazadas_ant":
+                cell.font = font_rech_ant
+            elif field_key == "Terminadas":
+                cell.fill = fill_buenas
+                cell.font = data_bold
+            elif field_key == "Rechazos":
+                cell.fill = fill_malas
+                cell.font = data_bold
+            elif field_key == "Pendiente Total OF":
+                cell.font = font_pend_tot
+                
+        curr_row += 1
+
+    # 4. Fila de Totales
+    ws.row_dimensions[curr_row].height = 22
+    ws.cell(row=curr_row, column=1, value="TOTALES").font = tot_font
+    ws.cell(row=curr_row, column=1).alignment = center_align
+    ws.cell(row=curr_row, column=1).fill = tot_fill
+    ws.cell(row=curr_row, column=1).border = thick_bottom
+
+    for col_idx in range(2, len(cols_def) + 1):
+        cell = ws.cell(row=curr_row, column=col_idx)
+        cell.fill = tot_fill
+        cell.border = thick_bottom
+        field_key = cols_def[col_idx - 1][0]
+        
+        # Calcular sumas si son numéricas
+        if field_key in ["total_requeridas", "Pendiente Disponible", "terminadas_ant", "rechazadas_ant", "Terminadas", "Rechazos", "Pendiente Total OF"]:
+            col_letter = get_column_letter(col_idx)
+            start_row = 5
+            end_row = curr_row - 1
+            if end_row >= start_row:
+                cell.value = f"=SUM({col_letter}{start_row}:{col_letter}{end_row})"
+            else:
+                cell.value = 0
+            cell.font = tot_font
+            cell.alignment = center_align
+            
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
 
 def view_avances():
     st.markdown("## 🏭 Panel de Operador - Registro de Avances")
@@ -714,7 +894,23 @@ def view_avances():
             edited_df["Terminadas"] = pd.to_numeric(edited_df["Terminadas"], errors='coerce').fillna(0).astype(int)
             edited_df["Rechazos"] = pd.to_numeric(edited_df["Rechazos"], errors='coerce').fillna(0).astype(int)
             
-            if st.button(f"✅ Registrar Avance en {area_seleccionada}", type="primary"):
+            col_b1, col_b2 = st.columns([1, 1])
+            with col_b1:
+                btn_avance = st.button(f"✅ Registrar Avance en {area_seleccionada}", type="primary", use_container_width=True)
+            with col_b2:
+                excel_bytes = generate_wip_table_excel(edited_df, of_number, area_seleccionada, total_wip_actual)
+                clean_of = re.sub(r'[^a-zA-Z0-9_-]', '_', of_number)
+                fecha_tag = get_local_now().strftime("%Y%m%d_%H%M")
+                st.download_button(
+                    label=f"📥 Descargar Tabla WIP ({area_seleccionada}) en Excel",
+                    data=excel_bytes,
+                    file_name=f"WIP_{area_seleccionada}_{clean_of}_{fecha_tag}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="secondary"
+                )
+
+            if btn_avance:
                 if not operador.strip():
                     st.error("⚠️ Por favor selecciona un Operador válido.")
                     st.stop()

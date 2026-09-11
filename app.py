@@ -161,6 +161,7 @@ def render_sidebar():
         {"key": "pronest_of",    "icon": "📑", "label": "Generador OF (ProNest)",  "admin_only": False},
         {"key": "manufactura",   "icon": "🤖", "label": "Manufactura Inteligente",  "admin_only": False},
         {"key": "entarimado",    "icon": "📦", "label": "Entarimado y Embarque",    "admin_only": False},
+        {"key": "inventario_wip","icon": "🔍", "label": "Inventario WIP / Tarimas",  "admin_only": False},
         None,  # separador
         {"key": "mantenimiento", "icon": "🛠️", "label": "Mantenimiento / Admin",     "admin_only": True},
         {"key": "sgc",           "icon": "📂", "label": "Documentos SGC",            "admin_only": True},
@@ -310,6 +311,7 @@ from views.dashboard import view_dashboard
 from views.dashboard_global import view_dashboard_global
 from views.manufactura import view_manufactura
 from views.entarimado import view_entarimado
+from views.inventario_wip import view_inventario_wip
 from views.dashboard_etiquetas import view_dashboard_etiquetas
 
 # --- Vistas Principales (imported from views/) ---
@@ -394,6 +396,8 @@ def main():
             view_manufactura()
         elif choice == "entarimado":
             view_entarimado()
+        elif choice == "inventario_wip":
+            view_inventario_wip()
         elif choice == "mantenimiento":
             view_mantenimiento()
         elif choice == "sgc":
@@ -402,4 +406,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Force reload: 2026-08-28 17:57
+# Force reload: 2026-09-11 12:28 - WIP Excel Export Button Active
