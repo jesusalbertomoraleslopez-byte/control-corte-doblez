@@ -93,7 +93,19 @@ def view_generador_of():
             up_pie = st.file_uploader("📄 3. DETALLE DE LA PIEZA (PDF)", type=["pdf"], key="c_up_pie")
 
         if up_res and up_nid and up_pie:
-            of_cloud_nom = st.text_input("Número / Nombre de la OF:", value=up_res.name.replace(".pdf", ""))
+            default_of_name = up_res.name.replace(".pdf", "")
+            if "resumen" in default_of_name.lower():
+                try:
+                    import fitz
+                    doc_tmp = fitz.open(stream=up_res.getvalue(), filetype="pdf")
+                    lines_tmp = [l.strip() for l in doc_tmp[0].get_text().split("\n") if l.strip()]
+                    for l in lines_tmp[:12]:
+                        if l.startswith("OF ") or l.startswith("0F "):
+                            default_of_name = l
+                            break
+                except Exception:
+                    pass
+            of_cloud_nom = st.text_input("Número / Nombre de la OF:", value=default_of_name)
             po_cloud = st.text_input("Orden de Compra (PO):", value="")
             proj_cloud = st.text_input("Nombre del Proyecto de Cliente:", value="")
 
