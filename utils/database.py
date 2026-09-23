@@ -673,24 +673,29 @@ def get_avances_area(of_number, area):
 
 def save_avances_mixto(of_number, nido, area, is_corte, df_terminadas, df_rechazos, operador="", maquina="", hoja=None):
     """Guarda avances y rechazos. 
-    Para Corte, df_terminadas trae todo el nido. Para otras, trae piezas individuales."""
+    Para Corte, df_terminadas trae todo el nido. Para otras, trae piezas individuales.
+    hoja puede ser un int, None, o una lista/tupla de ints (para registro en lote de hojas en corte)."""
     conn = get_connection()
     c = conn.cursor()
     now = get_local_now().strftime("%Y-%m-%d %H:%M:%S")
     
+    lista_hojas = list(hoja) if isinstance(hoja, (list, tuple, set)) else [hoja]
+    
     # 1. Registrar el avance
     if not df_terminadas.empty:
-        for _, row in df_terminadas.iterrows():
-            no_pieza = str(row["no_pieza"]) if "no_pieza" in row else ""
-            cant = int(pd.to_numeric(row.get("Terminadas", row.get("cantidad", 0)), errors='coerce'))
-            row_of = str(row.get("of_number", of_number))
-            
-            if cant > 0:
-                c.execute("INSERT INTO avances (of_number, nido, no_pieza, area, cantidad, operador, maquina, hoja, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          (row_of, nido, no_pieza, area, cant, operador, maquina, hoja, now))
+        for h_actual in lista_hojas:
+            for _, row in df_terminadas.iterrows():
+                no_pieza = str(row["no_pieza"]) if "no_pieza" in row else ""
+                cant = int(pd.to_numeric(row.get("Terminadas", row.get("cantidad", 0)), errors='coerce'))
+                row_of = str(row.get("of_number", of_number))
+                
+                if cant > 0:
+                    c.execute("INSERT INTO avances (of_number, nido, no_pieza, area, cantidad, operador, maquina, hoja, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                              (row_of, nido, no_pieza, area, cant, operador, maquina, h_actual, now))
     
-    # 2. Registrar rechazos
+    # 2. Registrar rechazos (se registran una sola vez con la primera hoja como referencia)
     if df_rechazos is not None and not df_rechazos.empty:
+        hoja_ref = lista_hojas[0] if lista_hojas else None
         for _, row in df_rechazos.iterrows():
             cant = int(pd.to_numeric(row.get("Rechazos", 0), errors='coerce'))
             motivo = str(row.get("Motivo", ""))
@@ -699,7 +704,7 @@ def save_avances_mixto(of_number, nido, area, is_corte, df_terminadas, df_rechaz
             
             if cant > 0:
                 c.execute("INSERT INTO rechazos (of_number, nido, no_pieza, area, cantidad, motivo, operador, maquina, hoja, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          (row_of, nido, no_pieza, area, cant, motivo, operador, maquina, hoja, now))
+                          (row_of, nido, no_pieza, area, cant, motivo, operador, maquina, hoja_ref, now))
                 
     conn.commit()
     save_db_to_excel(conn)   # ← CRÍTICO: actualizar Excel inmediatamente

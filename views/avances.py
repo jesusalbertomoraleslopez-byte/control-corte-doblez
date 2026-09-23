@@ -927,15 +927,15 @@ def view_avances():
                         
                         nido_changed = False
                         # Registrar todas las hojas faltantes para este nido
-                        for h in range(1, total_hojas + 1):
-                            if h not in hojas_cortadas:
-                                df_terminadas = df_nido[['no_pieza', 'nombre_pieza', 'cantidad']].copy()
-                                df_terminadas["Terminadas"] = df_terminadas["cantidad"]
-                                df_terminadas["of_number"] = actual_of
-                                
-                                save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, None, operador, maquina, h)
-                                total_hojas_completadas += 1
-                                nido_changed = True
+                        hojas_faltantes = [h for h in range(1, total_hojas + 1) if h not in hojas_cortadas]
+                        if hojas_faltantes:
+                            df_terminadas = df_nido[['no_pieza', 'nombre_pieza', 'cantidad']].copy()
+                            df_terminadas["Terminadas"] = df_terminadas["cantidad"]
+                            df_terminadas["of_number"] = actual_of
+                            
+                            save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, None, operador, maquina, hojas_faltantes)
+                            total_hojas_completadas += len(hojas_faltantes)
+                            nido_changed = True
                         if nido_changed or len(hojas_cortadas) >= total_hojas:
                             total_nidos_completados += 1
                             
@@ -970,25 +970,73 @@ def view_avances():
             hojas_cortadas = {int(row[0]) for row in c.fetchall()}
             conn.close()
             
-            # Encontrar la primera hoja pendiente (1-indexed)
-            hoja_actual = 1
-            for h in range(1, total_hojas + 1):
-                if h not in hojas_cortadas:
-                    hoja_actual = h
-                    break
-            else:
-                hoja_actual = total_hojas + 1
+            # Encontrar todas las hojas pendientes (1-indexed)
+            hojas_pendientes = [h for h in range(1, total_hojas + 1) if h not in hojas_cortadas]
+            total_pendientes = len(hojas_pendientes)
             
-            if hoja_actual > total_hojas:
+            if total_pendientes == 0:
                 st.success(f"✅ Todas las hojas ({total_hojas}/{total_hojas}) de este Nesteo ya fueron cortadas.")
             else:
-                st.markdown(f"👇 **CORTE: Registrando Hoja {hoja_actual} de {total_hojas}**")
-                st.markdown(f"Las cantidades mostradas abajo corresponden **solamente a las piezas que salen de esta hoja**.")
-                
+                cant_key = f"corte_cant_hojas_{actual_of}_{actual_nido}"
+                if cant_key not in st.session_state:
+                    st.session_state[cant_key] = 1
+                else:
+                    if st.session_state[cant_key] > total_pendientes:
+                        st.session_state[cant_key] = total_pendientes
+                    elif st.session_state[cant_key] < 1:
+                        st.session_state[cant_key] = 1
+
+                def dec_hojas():
+                    if st.session_state[cant_key] > 1:
+                        st.session_state[cant_key] -= 1
+
+                def inc_hojas():
+                    if st.session_state[cant_key] < total_pendientes:
+                        st.session_state[cant_key] += 1
+
+                def min_hojas():
+                    st.session_state[cant_key] = 1
+
+                def max_hojas():
+                    st.session_state[cant_key] = total_pendientes
+
+                st.markdown(f"#### ✂️ Registro de Hojas Cortadas: **{total_pendientes} pendientes** (de {total_hojas} totales)")
+
+                # Selector interactivo +/- y casilla numérica
+                col_sel1, col_sel2, col_sel3, col_sel4, col_sel5 = st.columns([1, 1, 2, 1, 1.2])
+                with col_sel1:
+                    st.button("➖ -1", on_click=dec_hojas, disabled=(st.session_state[cant_key] <= 1), use_container_width=True, key=f"btn_dec_{actual_of}_{actual_nido}")
+                with col_sel2:
+                    st.button("1️⃣ Mín", on_click=min_hojas, disabled=(st.session_state[cant_key] <= 1), use_container_width=True, key=f"btn_min_{actual_of}_{actual_nido}")
+                with col_sel3:
+                    st.number_input(
+                        "Hojas a registrar",
+                        min_value=1,
+                        max_value=total_pendientes,
+                        step=1,
+                        key=cant_key,
+                        label_visibility="collapsed",
+                        help=f"Ingresa o ajusta el número de hojas cortadas a registrar (entre 1 y {total_pendientes})"
+                    )
+                with col_sel4:
+                    st.button("➕ +1", on_click=inc_hojas, disabled=(st.session_state[cant_key] >= total_pendientes), use_container_width=True, key=f"btn_inc_{actual_of}_{actual_nido}")
+                with col_sel5:
+                    st.button(f"🏁 Máx ({total_pendientes})", on_click=max_hojas, disabled=(st.session_state[cant_key] >= total_pendientes), use_container_width=True, key=f"btn_max_{actual_of}_{actual_nido}")
+
+                cant_seleccionada = int(st.session_state[cant_key])
+                hojas_a_registrar = hojas_pendientes[:cant_seleccionada]
+
+                if cant_seleccionada == 1:
+                    rango_texto = f"Hoja {hojas_a_registrar[0]}"
+                    st.caption(f"📌 Seleccionada: **{rango_texto}** de {total_hojas}. La tabla muestra las piezas que salen de **esta hoja**.")
+                else:
+                    rango_texto = f"Hojas {hojas_a_registrar[0]} a {hojas_a_registrar[-1]}"
+                    st.caption(f"📌 Seleccionadas: **{cant_seleccionada} hojas ({rango_texto})** de {total_hojas}. La tabla muestra cantidades por 1 hoja; al guardar se multiplicará automáticamente por {cant_seleccionada}.")
+
                 df_edit = df_nido[['no_pieza', 'nombre_pieza', 'cantidad']].copy()
                 df_edit['Rechazos'] = 0
                 df_edit['Motivo'] = ""
-                
+
                 edited_df = st.data_editor(
                     df_edit,
                     use_container_width=True,
@@ -1002,48 +1050,54 @@ def view_avances():
                     },
                     height=200
                 )
-                
+
                 col_b1, col_b2 = st.columns(2)
                 with col_b1:
-                    if st.button(f"✅ Registrar Hoja {hoja_actual} Terminada", type="primary", use_container_width=True):
+                    btn_label_1 = f"✅ Registrar {cant_seleccionada} Hojas ({rango_texto})" if cant_seleccionada > 1 else f"✅ Registrar Hoja {hojas_a_registrar[0]} Terminada"
+                    if st.button(btn_label_1, type="primary", use_container_width=True):
                         if not operador.strip():
                             st.error("⚠️ Por favor selecciona un Operador válido.")
                             st.stop()
-                            
+
                         df_terminadas = edited_df.copy()
-                        df_terminadas["Terminadas"] = df_terminadas["cantidad"] # Avanza exactamente lo de 1 hoja
+                        df_terminadas["Terminadas"] = df_terminadas["cantidad"]
                         df_terminadas["of_number"] = actual_of
-                        
+
                         df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
                         if not df_rechazos.empty:
                             df_rechazos["of_number"] = actual_of
-                            
-                        save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, hoja_actual)
-                        st.success(f"🎉 ¡Hoja {hoja_actual} registrada en Corte!")
+
+                        with st.spinner(f"Registrando {cant_seleccionada} hoja(s) en Corte..."):
+                            save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, hojas_a_registrar)
+
+                        st.session_state[cant_key] = 1
+                        st.success(f"🎉 ¡{cant_seleccionada} Hoja(s) registrada(s) en Corte ({rango_texto})!")
                         st.rerun()
-                
+
                 with col_b2:
-                    if st.button(f"⏩ Registrar TODAS las Hojas ({hoja_actual} a {total_hojas})", type="secondary", use_container_width=True):
-                        if not operador.strip():
-                            st.error("⚠️ Por favor selecciona un Operador válido.")
-                            st.stop()
-                            
-                        with st.spinner("Registrando todas las hojas..."):
-                            registered_count = 0
-                            for h in range(hoja_actual, total_hojas + 1):
-                                if h not in hojas_cortadas:
-                                    df_terminadas = edited_df.copy()
-                                    df_terminadas["Terminadas"] = df_terminadas["cantidad"]
-                                    df_terminadas["of_number"] = actual_of
-                                    
-                                    df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
-                                    if not df_rechazos.empty:
-                                        df_rechazos["of_number"] = actual_of
-                                        
-                                    save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, h)
-                                    registered_count += 1
-                        st.success(f"🎉 ¡{registered_count} Hojas registradas exitosamente en Corte!")
-                        st.rerun()
+                    if total_pendientes > 1:
+                        rango_todas = f"{hojas_pendientes[0]} a {hojas_pendientes[-1]}" if total_pendientes > 1 else f"{hojas_pendientes[0]}"
+                        if st.button(f"⏩ Registrar TODAS ({total_pendientes} Hojas: {rango_todas})", type="secondary", use_container_width=True):
+                            if not operador.strip():
+                                st.error("⚠️ Por favor selecciona un Operador válido.")
+                                st.stop()
+
+                            df_terminadas = edited_df.copy()
+                            df_terminadas["Terminadas"] = df_terminadas["cantidad"]
+                            df_terminadas["of_number"] = actual_of
+
+                            df_rechazos = edited_df[edited_df["Rechazos"] > 0].copy()
+                            if not df_rechazos.empty:
+                                df_rechazos["of_number"] = actual_of
+
+                            with st.spinner(f"Registrando las {total_pendientes} hojas en Corte..."):
+                                save_avances_mixto(actual_of, actual_nido, area_seleccionada, is_corte, df_terminadas, df_rechazos, operador, maquina, hojas_pendientes)
+
+                            st.session_state[cant_key] = 1
+                            st.success(f"🎉 ¡Todas las {total_pendientes} Hojas pendientes ({rango_todas}) registradas exitosamente en Corte!")
+                            st.rerun()
+                    else:
+                        st.info("ℹ️ Solo queda 1 hoja pendiente en este nido.")
 
 
     elif is_post_corte:
