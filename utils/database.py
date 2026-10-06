@@ -1177,4 +1177,240 @@ def make_database_backup():
         print(f"Error creando backup: {e}")
     return None
 
+# =============================================================================
+# FUNCIONES PARA TABLERO KANBAN INTERACTIVO Y AVANCES EN LOTE
+# =============================================================================
+
+def marcar_avance_completo_area(of_number: str, area: str, operador: str = "Kanban", maquina: str = ""):
+    """
+    Registra el 100% de avance para una OF en un área específica.
+    Para 'Corte': Registra todas las hojas faltantes de todos los nidos.
+    Para 'Doblez' / 'Pintura' / 'Liberado': Registra todas las piezas faltantes según su ruta.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    now = get_local_now().strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        if area == "Corte":
+            c.execute("SELECT nido, hojas FROM nidos WHERE of_number = ?", (of_number,))
+            nidos_rows = c.fetchall()
+            for nido_id, total_hojas in nidos_rows:
+                total_h = int(total_hojas or 1)
+                c.execute("SELECT DISTINCT hoja FROM avances WHERE of_number = ? AND nido = ? AND area = 'Corte' AND hoja IS NOT NULL", (of_number, nido_id))
+                hojas_registradas = {r[0] for r in c.fetchall()}
+
+                for h in range(1, total_h + 1):
+                    if h not in hojas_registradas:
+                        c.execute(
+                            "INSERT INTO avances (of_number, nido, no_pieza, area, cantidad, operador, maquina, hoja, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (of_number, nido_id, "", "Corte", 1, operador, maquina, h, now)
+                        )
+
+        elif area in ["Doblez", "Pintura", "Liberado", "Empaque", "Rebabeo"]:
+            c.execute("""
+                SELECT p.nido, p.no_pieza, p.cantidad, n.hojas
+                FROM piezas p
+                JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+                WHERE p.of_number = ? AND (p.ruta LIKE ? OR ? = 'Liberado')
+            """, (of_number, f"%{area}%", area))
+            piezas_rows = c.fetchall()
+
+            for nido_id, no_pieza, cant_unitaria, hojas_nido in piezas_rows:
+                total_requerido = int(cant_unitaria or 0) * int(hojas_nido or 1)
+                if total_requerido <= 0:
+                    continue
+
+                c.execute("""
+                    SELECT SUM(cantidad) FROM avances 
+                    WHERE of_number = ? AND nido = ? AND no_pieza = ? AND area = ?
+                """, (of_number, nido_id, no_pieza, area))
+                row_av = c.fetchone()
+                av_actual = row_av[0] or 0
+
+                faltante = max(0, total_requerido - av_actual)
+                if faltante > 0:
+                    c.execute(
+                        "INSERT INTO avances (of_number, nido, no_pieza, area, cantidad, operador, maquina, hoja, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (of_number, nido_id, no_pieza, area, faltante, operador, maquina, None, now)
+                    )
+
+        conn.commit()
+        save_db_to_excel(conn)
+        conn.close()
+        git_sync_db()
+
+        try:
+            from utils.gcs_sync import push_db_to_gcs_async
+            push_db_to_gcs_async()
+        except Exception:
+            pass
+
+        return True
+    except Exception as e:
+        print(f"Error marcando avance completo en {area} para {of_number}: {e}")
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return False
+
+def get_kanban_production_data():
+    """
+    Obtiene todas las Órdenes de Fabricación activas con su estado de avance detallado
+    y las clasifica en una de las 7 etapas del Tablero Kanban de Producción:
+    1. programada
+    2. corte
+    3. wip_doblez
+    4. doblez
+    5. wip_pintura
+    6. pintura
+    7. liberado
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT of_number, fecha, po, proyecto, proyecto_cliente, prioridad, etiqueta_proyecto 
+        FROM ordenes 
+        ORDER BY of_number DESC
+    """)
+    ordenes_rows = c.fetchall()
+
+    if not ordenes_rows:
+        conn.close()
+        return []
+
+    c.execute("SELECT of_number, COUNT(nido), SUM(hojas) FROM nidos GROUP BY of_number")
+    nidos_dict = {r[0]: {"total_nidos": r[1] or 0, "total_hojas": r[2] or 0} for r in c.fetchall()}
+
+    c.execute("""
+        SELECT p.of_number, SUM(p.cantidad * n.hojas)
+        FROM piezas p
+        JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+        GROUP BY p.of_number
+    """)
+    piezas_dict = {r[0]: (r[1] or 0) for r in c.fetchall()}
+
+    c.execute("SELECT of_number, GROUP_CONCAT(DISTINCT calibre) FROM nidos GROUP BY of_number")
+    calibres_dict = {r[0]: (r[1] or "") for r in c.fetchall()}
+
+    c.execute("""
+        SELECT of_number, COUNT(DISTINCT nido || '||' || hoja)
+        FROM avances 
+        WHERE area = 'Corte' AND hoja IS NOT NULL
+        GROUP BY of_number
+    """)
+    cortadas_dict = {r[0]: (r[1] or 0) for r in c.fetchall()}
+
+    c.execute("""
+        SELECT of_number, area, SUM(cantidad)
+        FROM avances
+        WHERE area IN ('Doblez', 'Pintura', 'Liberado')
+        GROUP BY of_number, area
+    """)
+    avances_areas_dict = {}
+    for r in c.fetchall():
+        avances_areas_dict[(r[0], r[1])] = r[2] or 0
+
+    c.execute("""
+        SELECT p.of_number, 'Doblez' as area, SUM(p.cantidad * n.hojas)
+        FROM piezas p
+        JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+        WHERE p.ruta LIKE '%Doblez%'
+        GROUP BY p.of_number
+    """)
+    req_doblez_dict = {r[0]: (r[2] or 0) for r in c.fetchall()}
+
+    c.execute("""
+        SELECT p.of_number, 'Pintura' as area, SUM(p.cantidad * n.hojas)
+        FROM piezas p
+        JOIN nidos n ON p.of_number = n.of_number AND p.nido = n.nido
+        WHERE p.ruta LIKE '%Pintura%'
+        GROUP BY p.of_number
+    """)
+    req_pintura_dict = {r[0]: (r[2] or 0) for r in c.fetchall()}
+
+    conn.close()
+
+    resultado = []
+    for row in ordenes_rows:
+        of_num = str(row[0])
+        fecha_crea = str(row[1] or "")
+        folio_po = str(row[2] or "")
+        proyecto = str(row[3] or "")
+        cliente = str(row[4] or "")
+        prioridad = str(row[5] or "Media").strip().capitalize()
+        etiqueta = str(row[6] or "").strip()
+        estado_db = ""
+
+        ndata = nidos_dict.get(of_num, {"total_nidos": 0, "total_hojas": 0})
+        total_nidos = ndata["total_nidos"]
+        total_hojas = ndata["total_hojas"]
+        total_piezas = piezas_dict.get(of_num, 0)
+        calibre_str = calibres_dict.get(of_num, "")
+
+        hojas_cortadas = cortadas_dict.get(of_num, 0)
+        pct_corte = (hojas_cortadas / total_hojas * 100) if total_hojas > 0 else 0.0
+
+        pzs_doblez = avances_areas_dict.get((of_num, 'Doblez'), 0)
+        req_doblez = req_doblez_dict.get(of_num, 0)
+        pct_doblez = (pzs_doblez / req_doblez * 100) if req_doblez > 0 else (100.0 if pct_corte >= 100 else 0.0)
+
+        pzs_pintura = avances_areas_dict.get((of_num, 'Pintura'), 0)
+        req_pintura = req_pintura_dict.get(of_num, 0)
+        pct_pintura = (pzs_pintura / req_pintura * 100) if req_pintura > 0 else (100.0 if pct_doblez >= 100 else 0.0)
+
+        pzs_liberado = avances_areas_dict.get((of_num, 'Liberado'), 0)
+        pct_liberado = (pzs_liberado / total_piezas * 100) if total_piezas > 0 else 0.0
+
+        if pct_liberado >= 100.0 or estado_db.lower() in ["terminada", "liberada"]:
+            stage = "liberado"
+        elif pct_pintura >= 100.0:
+            stage = "liberado"
+        elif pct_doblez >= 100.0 and req_pintura > 0:
+            if pct_pintura > 0:
+                stage = "pintura"
+            else:
+                stage = "wip_pintura"
+        elif pct_doblez >= 100.0 and req_pintura == 0:
+            stage = "liberado"
+        elif pct_corte >= 100.0 and req_doblez > 0:
+            if pct_doblez > 0:
+                stage = "doblez"
+            else:
+                stage = "wip_doblez"
+        elif pct_corte >= 100.0 and req_doblez == 0:
+            if req_pintura > 0:
+                stage = "wip_pintura" if pct_pintura == 0 else "pintura"
+            else:
+                stage = "liberado"
+        elif pct_corte > 0:
+            stage = "corte"
+        else:
+            stage = "programada"
+
+        resultado.append({
+            "of_number": of_num,
+            "folio_po": folio_po,
+            "proyecto": proyecto,
+            "cliente": cliente,
+            "etiqueta": etiqueta,
+            "prioridad": prioridad,
+            "total_nidos": total_nidos,
+            "total_hojas": total_hojas,
+            "total_piezas": total_piezas,
+            "calibre": calibre_str,
+            "pct_corte": round(min(100.0, pct_corte), 1),
+            "pct_doblez": round(min(100.0, pct_doblez), 1),
+            "pct_pintura": round(min(100.0, pct_pintura), 1),
+            "pct_liberado": round(min(100.0, pct_liberado), 1),
+            "req_doblez": req_doblez > 0,
+            "req_pintura": req_pintura > 0,
+            "stage": stage,
+            "fecha_creacion": fecha_crea
+        })
+
+    return resultado
+
 

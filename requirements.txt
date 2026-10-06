@@ -9,3 +9,4 @@ reportlab
 pillow
 xlsxwriter
 PyMuPDF
+google-cloud-storage

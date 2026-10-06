@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Odoo Kanban Component - SIGRAMA</title>
+    <link rel="stylesheet" href="css/odoo_theme.css?v=2.7.2">
+</head>
+<body>
+
+    <!-- BARRA SUPERIOR DE NAVEGACIÓN Y DESPLAZAMIENTO RÁPIDO -->
+    <div class="kanban-top-nav-bar" id="kanbanTopNavBar">
+        <div class="nav-scroll-group">
+            <button class="nav-scroll-btn" id="btnScrollLeft" title="Desplazar a la izquierda (fases previas)">◀</button>
+            <button class="nav-scroll-btn" id="btnToggleCompact" title="Alternar entre ancho compacto o estándar">📐 Compacto</button>
+            <div class="nav-stage-chips" id="navStageChips">
+                <!-- Se llena dinámicamente con las fases para salto directo -->
+            </div>
+            <button class="nav-scroll-btn" id="btnScrollRight" title="Desplazar a la derecha (fases siguientes)">▶</button>
+        </div>
+        <div class="nav-info-group">
+            <span class="nav-scroll-hint">💡 Clic en cualquier fase para saltar directo a ella</span>
+        </div>
+    </div>
+
+    <!-- WRAPPER CON SCROLLBAR HORIZONTAL PROMINENTE -->
+    <div class="kanban-scroll-wrapper" id="kanbanScrollWrapper">
+        <div class="kanban-board-container" id="kanbanBoard">
+            <!-- Renderizado dinámico desde kanban.js -->
+        </div>
+    </div>
+
+    <!-- SCRIPTS -->
+    <script src="js/sortable.min.js?v=2.7.2"></script>
+    <script src="js/kanban.js?v=2.7.2"></script>
+
+</body>
+</html>

@@ -30,6 +30,13 @@ components.html("""
 </script>
 """, height=0)
 
+# Sincronización inicial desde Google Cloud Storage (Persistencia Cloud Run)
+try:
+    from utils.gcs_sync import sync_db_from_gcs
+    sync_db_from_gcs()
+except Exception as _egcs:
+    print(f"[GCS] Aviso inicial: {_egcs}")
+
 # Inicializar Base de Datos SQLite
 init_db()
 
@@ -196,21 +203,23 @@ def render_sidebar():
     
     # Definición del menú con íconos y nombres mejorados
     MENU_ITEMS = [
-        {"key": "dashboard",     "icon": "📊", "label": "Panel de Control",          "admin_only": False},
-        {"key": "global",        "icon": "🌐", "label": "Monitoreo Global",          "admin_only": False},
-        {"key": "etiquetas",     "icon": "🏷️", "label": "Supervisión Etiquetas (PO)", "admin_only": False},
+        {"key": "dashboard",       "icon": "📊", "label": "Panel de Control",            "admin_only": False},
+        {"key": "kanban",          "icon": "🗂️", "label": "Tablero Kanban",             "admin_only": False},
+        {"key": "global",          "icon": "🌐", "label": "Monitoreo Global",            "admin_only": False},
+        {"key": "supervision_gcs", "icon": "🛰️", "label": "Supervisión Repositorio OF", "admin_only": False},
+        {"key": "etiquetas",       "icon": "🏷️", "label": "Supervisión Etiquetas (PO)", "admin_only": False},
         None,  # separador
-        {"key": "consultas",     "icon": "📋", "label": "Consultas y Reportes",     "admin_only": False},
-        {"key": "planeacion",    "icon": "📅", "label": "Planeación de Corte",       "admin_only": False},
+        {"key": "consultas",       "icon": "📋", "label": "Consultas y Reportes",       "admin_only": False},
+        {"key": "planeacion",      "icon": "📅", "label": "Planeación de Corte",         "admin_only": False},
         None,  # separador
-        {"key": "produccion",    "icon": "⚙️",  "label": "Control de Producción",   "admin_only": False},
-        {"key": "pronest_of",    "icon": "📑", "label": "Generador OF (ProNest)",  "admin_only": False},
-        {"key": "manufactura",   "icon": "🤖", "label": "Manufactura Inteligente",  "admin_only": False},
-        {"key": "entarimado",    "icon": "📦", "label": "Entarimado y Embarque",    "admin_only": False},
-        {"key": "inventario_wip","icon": "🔍", "label": "Inventario WIP / Tarimas",  "admin_only": False},
+        {"key": "produccion",      "icon": "⚙️",  "label": "Control de Producción",     "admin_only": False},
+        {"key": "pronest_of",      "icon": "📑", "label": "Generador OF (ProNest)",    "admin_only": False},
+        {"key": "manufactura",     "icon": "🤖", "label": "Manufactura Inteligente",    "admin_only": False},
+        {"key": "entarimado",      "icon": "📦", "label": "Entarimado y Embarque",      "admin_only": False},
+        {"key": "inventario_wip",  "icon": "🔍", "label": "Inventario WIP / Tarimas",    "admin_only": False},
         None,  # separador
-        {"key": "mantenimiento", "icon": "🛠️", "label": "Mantenimiento / Admin",     "admin_only": True},
-        {"key": "sgc",           "icon": "📂", "label": "Documentos SGC",            "admin_only": True},
+        {"key": "mantenimiento",   "icon": "🛠️", "label": "Mantenimiento / Admin",       "admin_only": True},
+        {"key": "sgc",             "icon": "📂", "label": "Documentos SGC",              "admin_only": True},
     ]
 
     is_admin = st.session_state.role == "Administrador"
@@ -364,6 +373,8 @@ from views.dashboard_etiquetas import view_dashboard_etiquetas
 
 from views.mantenimiento import view_mantenimiento
 from views.generador_of import view_generador_of
+from views.kanban_produccion import view_kanban_produccion
+from views.supervision_gcs import view_supervision_gcs
 
 def view_sgc():
     st.title("7. SGC (Sistema de Gestión de Calidad)")
@@ -426,8 +437,12 @@ def main():
         
         if choice == "dashboard":
             view_dashboard()
+        elif choice == "kanban":
+            view_kanban_produccion()
         elif choice == "global":
             view_dashboard_global()
+        elif choice == "supervision_gcs":
+            view_supervision_gcs()
         elif choice == "etiquetas":
             view_dashboard_etiquetas()
         elif choice == "consultas":
