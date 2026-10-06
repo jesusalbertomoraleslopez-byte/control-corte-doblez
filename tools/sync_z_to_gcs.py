@@ -128,13 +128,16 @@ def sincronizar_z_hacia_gcs(max_ofs=None, solo_recientes=False):
     subidos_count = 0
     omitidos_count = 0
     errores_count = 0
+    bytes_subidos = 0
+    bytes_omitidos = 0
+    carpetas_al_dia = 0
     ofs_manifest = []
 
     for idx, carpeta in enumerate(carpetas, 1):
         if max_ofs and idx > max_ofs:
             break
 
-        c_path = os.path.join(Z_DRIVE_PATH, carpeta)
+        c_path = os.path.join(Z_PATH_PATH, carpeta) if 'Z_PATH_PATH' in dir() else os.path.join(Z_DRIVE_PATH, carpeta)
         diag = analizar_archivos_carpeta(c_path)
         completo = bool(diag["resumen"] and diag["nido"] and diag["pieza"])
 
@@ -165,29 +168,37 @@ def sincronizar_z_hacia_gcs(max_ofs=None, solo_recientes=False):
         for extra in diag.get("otros", []):
             archivos_a_subir.append(os.path.join(c_path, extra))
 
-        status_icono = "🟢" if completo else ("🟡" if (diag["resumen"] or diag["nido"] or diag["pieza"]) else "⚪")
-        print(f"[{idx:03d}/{len(carpetas):03d}] {status_icono} {carpeta} ({len(archivos_a_subir)} archivos)")
-
+        # Comprobar si TODOS los archivos de esta OF ya están en GCS
+        archivos_faltantes = []
         for filepath in archivos_a_subir:
             filename = os.path.basename(filepath)
             gcs_blob_name = f"ordenes_fabricacion/{carpeta}/{filename}"
             local_size = os.path.getsize(filepath)
 
-            # Verificar si ya existe con el mismo tamaño en GCS
             if gcs_blob_name in blobs_existentes and blobs_existentes[gcs_blob_name] == local_size:
                 omitidos_count += 1
-                continue
+                bytes_omitidos += local_size
+            else:
+                archivos_faltantes.append((filepath, filename, gcs_blob_name, local_size))
 
-            # Subir a GCS
-            try:
-                blob = bucket.blob(gcs_blob_name)
-                blob.upload_from_filename(filepath)
-                blobs_existentes[gcs_blob_name] = local_size
-                subidos_count += 1
-                print(f"      ⬆️ Subido: {filename} ({local_size:,} bytes)")
-            except Exception as e:
-                errores_count += 1
-                print(f"      ❌ Error subiendo {filename}: {e}")
+        if not archivos_faltantes:
+            carpetas_al_dia += 1
+            print(f"[{idx:03d}/{len(carpetas):03d}] ⚡ [AL DÍA] {carpeta} (100% en la nube - 0 KB transferidos)")
+        else:
+            status_icono = "🟢" if completo else ("🟡" if (diag["resumen"] or diag["nido"] or diag["pieza"]) else "⚪")
+            print(f"[{idx:03d}/{len(carpetas):03d}] {status_icono} {carpeta} ({len(archivos_faltantes)} archivos faltantes)")
+
+            for filepath, filename, gcs_blob_name, local_size in archivos_faltantes:
+                try:
+                    blob = bucket.blob(gcs_blob_name)
+                    blob.upload_from_filename(filepath)
+                    blobs_existentes[gcs_blob_name] = local_size
+                    subidos_count += 1
+                    bytes_subidos += local_size
+                    print(f"      ⬆️ Subido: {filename} ({local_size:,} bytes)")
+                except Exception as e:
+                    errores_count += 1
+                    print(f"      ❌ Error subiendo {filename}: {e}")
 
     # 4. Guardar manifiesto en GCS y localmente
     print("\n📝 Generando y guardando manifest_ofs.json...")
@@ -220,13 +231,17 @@ def sincronizar_z_hacia_gcs(max_ofs=None, solo_recientes=False):
     except Exception:
         pass
 
+    mb_up = bytes_subidos / (1024 * 1024)
+    mb_saved = bytes_omitidos / (1024 * 1024)
+
     print("\n" + "=" * 75)
-    print(" 🏁 RESUMEN DE SINCRONIZACIÓN Z:\\ ➔ GCS")
+    print(" 🏁 RESUMEN DE SINCRONIZACIÓN INCREMENTAL Z:\\ ➔ GCS")
     print(f" • OFs analizadas: {len(ofs_manifest)}")
-    print(f" • OFs con 3 PDFs completos: {sum(1 for o in ofs_manifest if o['completo'])}")
-    print(f" • Archivos subidos: {subidos_count}")
-    print(f" • Archivos ya al día (omitidos): {omitidos_count}")
+    print(f" • OFs ya completas en la nube (omitidas): {carpetas_al_dia}")
+    print(f" • Archivos nuevos subidos: {subidos_count} ({mb_up:.2f} MB transferidos)")
+    print(f" • Archivos ya existentes omitidos: {omitidos_count} ({mb_saved:.2f} MB ahorrados)")
     print(f" • Errores de transferencia: {errores_count}")
+    print(" • Cero tráfico redundante garantizado.")
     print("=" * 75)
     return True
 

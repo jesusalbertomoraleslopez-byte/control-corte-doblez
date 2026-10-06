@@ -312,6 +312,9 @@ class SigramaOFSynchronizerApp:
         subidos = 0
         omitidos = 0
         errores = 0
+        bytes_subidos = 0
+        bytes_omitidos = 0
+        carpetas_al_dia = 0
         manifest_ofs = []
 
         for idx, carpeta in enumerate(carpetas, 1):
@@ -358,7 +361,8 @@ class SigramaOFSynchronizerApp:
                 "completo": completo
             })
 
-            # Subir archivos
+            # Comprobar si TODOS los archivos de esta OF ya existen en GCS
+            faltantes_carpeta = []
             for fpath in archivos_a_subir:
                 fname = os.path.basename(fpath)
                 blob_name = f"ordenes_fabricacion/{carpeta}/{fname}"
@@ -366,17 +370,25 @@ class SigramaOFSynchronizerApp:
 
                 if blob_name in blobs_existentes and blobs_existentes[blob_name] == local_sz:
                     omitidos += 1
-                    continue
+                    bytes_omitidos += local_sz
+                else:
+                    faltantes_carpeta.append((fpath, fname, blob_name, local_sz))
 
-                try:
-                    bl = bucket.blob(blob_name)
-                    bl.upload_from_filename(fpath)
-                    blobs_existentes[blob_name] = local_sz
-                    subidos += 1
-                    self._log(f"   ⬆️ Subido: {carpeta} / {fname} ({local_sz:,} B)")
-                except Exception as eup:
-                    errores += 1
-                    self._log(f"   ❌ Error subiendo {fname}: {eup}")
+            if not faltantes_carpeta:
+                carpetas_al_dia += 1
+            else:
+                self._log(f"⚡ OF con datos nuevos/faltantes: {carpeta} ({len(faltantes_carpeta)} archivos)")
+                for fpath, fname, blob_name, local_sz in faltantes_carpeta:
+                    try:
+                        bl = bucket.blob(blob_name)
+                        bl.upload_from_filename(fpath)
+                        blobs_existentes[blob_name] = local_sz
+                        subidos += 1
+                        bytes_subidos += local_sz
+                        self._log(f"   ⬆️ Subido: {fname} ({local_sz:,} B)")
+                    except Exception as eup:
+                        errores += 1
+                        self._log(f"   ❌ Error subiendo {fname}: {eup}")
 
             # Actualizar barra de progreso
             pct = (idx / total_carpetas) * 100
@@ -409,8 +421,16 @@ class SigramaOFSynchronizerApp:
             pass
 
         duracion = time.time() - t0
-        resumen = f"Finalizado en {duracion:.1f}s | Subidos: {subidos} | Ya existentes: {omitidos} | Errores: {errores}"
-        self._log(f"🏁 {resumen}")
+        mb_subidos = bytes_subidos / (1024 * 1024)
+        mb_ahorrados = bytes_omitidos / (1024 * 1024)
+        resumen = (
+            f"Finalizado en {duracion:.1f}s\n"
+            f"• OFs ya al día (omitidas): {carpetas_al_dia} de {total_carpetas}\n"
+            f"• Archivos nuevos subidos: {subidos} ({mb_subidos:.2f} MB transferidos)\n"
+            f"• Archivos ya existentes omitidos: {omitidos} ({mb_ahorrados:.2f} MB ahorrados)\n"
+            f"• Errores de red: {errores}"
+        )
+        self._log(f"🏁 RESUMEN INCREMENTAL:\n{resumen}")
         self._finish_sync(True, resumen)
 
     def _finish_sync(self, exito, mensaje):
