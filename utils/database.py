@@ -36,17 +36,21 @@ def sync_and_push_db():
     # Fetch remoto
     subprocess.run(["git", "fetch", "origin", "main"], capture_output=True)
 
-    # Intentar obtener el Excel de la rama remota
+    # Intentar obtener el Excel de la rama remota de forma binaria segura
     remote_excel = "sigrama_database_remote.xlsx"
     has_remote = False
-    res_show = subprocess.run(["git", "show", "origin/main:sigrama_database.xlsx"], capture_output=True)
-    if res_show.returncode == 0:
+    res_show = subprocess.run(["git", "cat-file", "blob", "origin/main:sigrama_database.xlsx"], capture_output=True)
+    if res_show.returncode == 0 and len(res_show.stdout) > 10000:
         try:
-            with open(remote_excel, "wb") as f:
-                f.write(res_show.stdout)
-            has_remote = True
-        except Exception:
-            pass
+            import io
+            _test_remote = pd.ExcelFile(io.BytesIO(res_show.stdout))
+            if 'ordenes' in _test_remote.sheet_names:
+                with open(remote_excel, "wb") as f:
+                    f.write(res_show.stdout)
+                has_remote = True
+        except Exception as e_rem:
+            print(f"Excel remoto inválido u omitido: {e_rem}")
+            has_remote = False
 
     # Fusionar datos en SQLite
     conn = sqlite3.connect(TEMP_DB_PATH)
@@ -113,6 +117,16 @@ def sync_and_push_db():
     # Guardar estado SQLite a Excel local
     save_db_to_excel()
 
+    # Validar integridad del Excel antes de hacer commit y push
+    try:
+        _chk_pre = pd.ExcelFile(EXCEL_DB_PATH)
+        if 'ordenes' not in _chk_pre.sheet_names:
+            print("El Excel no contiene 'ordenes'. Se cancela el push.")
+            return None, None
+    except Exception as e_chk:
+        print(f"El Excel local no es válido ({e_chk}). Se cancela el push.")
+        return None, None
+
     # Configurar identidad de git
     subprocess.run(["git", "config", "user.email", "bot@sigrama.com"], capture_output=True)
     subprocess.run(["git", "config", "user.name", "Sigrama Bot"], capture_output=True)
@@ -147,7 +161,7 @@ def git_sync_db():
     threading.Thread(target=_sync, daemon=True).start()
 
 def save_db_to_excel(conn=None):
-    """Exporta todas las tablas SQLite al archivo Excel sigrama_database.xlsx."""
+    """Exporta todas las tablas SQLite al archivo Excel sigrama_database.xlsx con verificación de integridad."""
     close_at_end = False
     if conn is None:
         conn = sqlite3.connect(TEMP_DB_PATH)
@@ -164,8 +178,14 @@ def save_db_to_excel(conn=None):
                     df = pd.DataFrame()
                 df.to_excel(writer, sheet_name=t, index=False)
         
+        # Validar integridad del archivo generado antes de sobrescribir el principal
         if os.path.exists(temp_excel) and os.path.getsize(temp_excel) > 10000:
-            shutil.copyfile(temp_excel, EXCEL_DB_PATH)
+            try:
+                _test_chk = pd.ExcelFile(temp_excel)
+                if 'ordenes' in _test_chk.sheet_names:
+                    shutil.copyfile(temp_excel, EXCEL_DB_PATH)
+            except Exception as _e_corrupt:
+                print(f"Advertencia: Archivo temporal generado está corrupto ({_e_corrupt}), no se reemplaza el archivo principal.")
         if os.path.exists(temp_excel):
             try:
                 os.remove(temp_excel)
@@ -225,6 +245,16 @@ def sync_excel_to_sqlite():
         conn.commit()
     except Exception as e:
         print(f"Error al sincronizar Excel a SQLite: {e}")
+        # Si el Excel falló por corrupción pero SQLite tiene datos, restaurar Excel desde SQLite
+        if os.path.exists(TEMP_DB_PATH):
+            try:
+                c_rec = sqlite3.connect(TEMP_DB_PATH)
+                n_o = c_rec.execute("SELECT count(*) FROM ordenes").fetchone()[0]
+                c_rec.close()
+                if n_o > 0:
+                    save_db_to_excel()
+            except Exception:
+                pass
     finally:
         conn.close()
 
