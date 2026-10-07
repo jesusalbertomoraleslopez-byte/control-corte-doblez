@@ -907,9 +907,23 @@ def get_dashboard_stats(of_list=None):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_personal_prenomina():
-    """Carga la lista de personal de la prenomina desde local o GitHub raw url. Cache TTL: 1 hora."""
+    """Carga la lista de personal de la prenomina desde GCS (sigrama-prenomina-storage), local o GitHub. Cache TTL: 1 hora."""
     import os
+    import io
     import pandas as pd
+
+    # 1. Intentar directamente desde Google Cloud Storage (Red GCP)
+    try:
+        from google.cloud import storage
+        client = storage.Client()
+        blob = client.bucket("sigrama-prenomina-storage").blob("personal.xlsx")
+        if blob.exists():
+            data = blob.download_as_bytes()
+            return pd.read_excel(io.BytesIO(data))
+    except Exception as e_gcs:
+        pass
+
+    # 2. Fallback a local o GitHub (desarrollo local)
     url_github = "https://raw.githubusercontent.com/jesusalbertomoraleslopez-byte/sigrama-prenomina-app/main/personal.xlsx"
     local_path = "../sigrama-prenomina-app/personal.xlsx"
     try:
