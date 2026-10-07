@@ -19,7 +19,9 @@ LOCAL_EXCEL_PATH = BASE_DIR / EXCEL_DB_NAME
 TEMP_DB_PATH = BASE_DIR / "sigrama_temp.db"
 
 # Bucket oficial de Google Cloud Storage
-GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET", "sigrama-corte-doblez-storage").strip()
+_raw_bucket = os.environ.get("GCS_BUCKET", "sigrama-corte-doblez-storage").strip()
+# Si por error de despliegue viene acompañado de otros parámetros (ej. 'sigrama-corte-doblez-storage PYTHONUNBUFFERED=1')
+GCS_BUCKET_NAME = _raw_bucket.split()[0] if _raw_bucket else "sigrama-corte-doblez-storage"
 
 _storage_client = None
 _bucket_obj = None
@@ -46,7 +48,14 @@ def is_gcs_available() -> bool:
     if b is None:
         return False
     try:
-        return b.exists()
+        if b.exists():
+            return True
+    except Exception:
+        pass
+    try:
+        # Fallback si no tiene permiso storage.buckets.get a nivel proyecto
+        blobs_sample = list(b.list_blobs(max_results=1))
+        return True
     except Exception:
         return False
 
