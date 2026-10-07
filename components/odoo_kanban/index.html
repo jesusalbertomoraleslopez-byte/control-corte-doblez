@@ -23,10 +23,18 @@
         </div>
     </div>
 
-    <!-- WRAPPER CON SCROLLBAR HORIZONTAL PROMINENTE -->
-    <div class="kanban-scroll-wrapper" id="kanbanScrollWrapper">
-        <div class="kanban-board-container" id="kanbanBoard">
-            <!-- Renderizado dinámico desde kanban.js -->
+    <!-- LAYOUT PRINCIPAL: COLUMNAS ACTIVAS SCROLLEABLES + VENTANA FIJA A LA DERECHA -->
+    <div class="kanban-layout-wrapper" id="kanbanLayoutWrapper">
+        <!-- ÁREA IZQUIERDA: WRAPPER CON SCROLLBAR HORIZONTAL PROMINENTE -->
+        <div class="kanban-scroll-wrapper" id="kanbanScrollWrapper">
+            <div class="kanban-board-container" id="kanbanBoard">
+                <!-- Renderizado dinámico de fases 1 a 6 (Programada -> Pintura) -->
+            </div>
+        </div>
+
+        <!-- VENTANA / COLUMNA FIJA A LA DERECHA (TERMINADAS / LIBERADO) -->
+        <div class="kanban-fixed-dock" id="kanbanFixedDock">
+            <!-- Renderizado dinámico de la fase 7 (Terminada / Liberado) fija a la derecha -->
         </div>
     </div>
 

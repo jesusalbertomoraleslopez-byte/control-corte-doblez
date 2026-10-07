@@ -296,10 +296,10 @@ def view_kanban_produccion():
             "cards": cards
         })
 
-    # Barra informativa
+    # Barra informativa de alto contraste
     st.markdown("""
-    <div style="background: rgba(236,32,36,0.06); border-left: 4px solid #EC2024; padding: 8px 14px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; color: #1E293B;">
-        🖐️ <b>Avance en 1 Arrastre:</b> Mueva cualquier tarjeta entre columnas para actualizar automáticamente el estado y registrar el avance completo en producción (Corte, Doblez, Pintura). Haga doble clic o use el botón de la tarjeta para inspeccionar el detalle.
+    <div style="background: #FFFFFF; border: 1px solid #CBD5E1; border-left: 5px solid #EC2024; padding: 10px 16px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; color: #0F172A; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        🖐️ <b>Avance en 1 Arrastre:</b> Desplace tarjetas entre procesos para actualizar el avance en piso. <b>🎯 Ventana Fija a la Derecha:</b> Arrastre cualquier OF directamente al panel verde <b>🏁 Liberado</b> para registrar el avance al 100% (Corte, Doblez y Pintura) al instante sin necesidad de scroll.
     </div>
     """, unsafe_allow_html=True)
 

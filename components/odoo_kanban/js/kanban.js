@@ -73,14 +73,56 @@ window.addEventListener("resize", () => {
 // ==========================================================================
 // 2. RENDERIZADO DEL TABLERO KANBAN CON SORTABLEJS
 // ==========================================================================
+function setupSortableOnDropzone(dropzoneEl) {
+    const sortable = new Sortable(dropzoneEl, {
+        group: "odoo_kanban_group",
+        animation: 180,
+        ghostClass: "sortable-ghost",
+        chosenClass: "sortable-chosen",
+        dragClass: "sortable-drag",
+        fallbackTolerance: 3,
+        scroll: true,
+        scrollSensitivity: 80,
+        scrollSpeed: 15,
+        bubbleScroll: true,
+
+        onEnd: function (evt) {
+            const itemEl = evt.item;
+            const fromColId = evt.from.dataset.stageId;
+            const toColId = evt.to.dataset.stageId;
+            const reqId = itemEl.dataset.reqId;
+            const newDbStatus = evt.to.dataset.dbStatus;
+
+            // Si la tarjeta cambió de columna
+            if (fromColId !== toColId) {
+                // Notificar inmediatamente a Python (Streamlit)
+                sendValueToStreamlit({
+                    action: "move_stage",
+                    event_id: Date.now() + "_" + Math.random().toString(36).substring(2, 9),
+                    req_id: reqId,
+                    old_stage: fromColId,
+                    new_stage: toColId,
+                    new_db_status: newDbStatus
+                });
+            }
+        }
+    });
+
+    sortableInstances.push(sortable);
+}
+
 function renderKanbanBoard(columns, totalCount) {
     const boardContainer = document.getElementById("kanbanBoard");
+    const fixedDockContainer = document.getElementById("kanbanFixedDock");
     if (!boardContainer) return;
 
-    // Destruir instancias previas
+    // Destruir instancias previas de Sortable
     sortableInstances.forEach(inst => inst.destroy());
     sortableInstances = [];
     boardContainer.innerHTML = "";
+    if (fixedDockContainer) {
+        fixedDockContainer.innerHTML = "";
+    }
 
     if (localStorage.getItem("sigrama_kanban_compact") === "true") {
         boardContainer.classList.add("compact-mode");
@@ -88,24 +130,26 @@ function renderKanbanBoard(columns, totalCount) {
 
     const foldedStages = JSON.parse(localStorage.getItem("sigrama_folded_stages") || "[]");
 
-    columns.forEach(col => {
+    // Separar columnas activas de la columna final de Terminadas
+    const activeColumns = columns.filter(col => col.db_status !== "liberado");
+    const finishedColumn = columns.find(col => col.db_status === "liberado");
+
+    // 1. Renderizar Fases Activas en el Tablero con Desplazamiento
+    activeColumns.forEach(col => {
         const isFolded = foldedStages.includes(col.id);
         const columnEl = document.createElement("div");
         columnEl.className = `kanban-column ${isFolded ? "folded" : ""}`;
         columnEl.dataset.stageId = col.id;
 
-        const formattedTotal = new Intl.NumberFormat('es-MX', {
-            style: 'currency',
-            currency: 'MXN',
-            maximumFractionDigits: 0
-        }).format(col.total_monto || 0);
+        const formattedTotal = `${(col.total_monto || 0).toLocaleString('es-MX')} Pzs`;
 
         columnEl.innerHTML = `
             <div class="column-header">
                 <div class="column-top-bar" style="background-color: ${col.color};"></div>
                 <div class="column-title-row">
-                    <span class="column-title" style="color: ${col.accent};">
-                        <span>${col.icon}</span> ${col.short_title}
+                    <span class="column-title">
+                        <span class="column-icon-badge" style="background-color: ${col.color}; color: #FFFFFF;">${col.icon}</span>
+                        <span class="column-title-text">${col.short_title}</span>
                     </span>
                     <div class="column-actions">
                         <span class="column-badge" id="badge-${col.id}">${col.cards.length}</span>
@@ -113,11 +157,11 @@ function renderKanbanBoard(columns, totalCount) {
                     </div>
                 </div>
                 <div class="column-metrics-row">
-                    <span style="font-size: 11px; color: #64748B;">Subtotal:</span>
+                    <span>En Proceso:</span>
                     <span class="column-total">${formattedTotal}</span>
                 </div>
                 <div class="column-progress-bar">
-                    <div class="column-progress-fill" style="width: ${Math.min(100, (col.cards.length / Math.max(1, totalCount)) * 260)}%; background-color: ${col.color};"></div>
+                    <div class="column-progress-fill" style="width: ${Math.min(100, (col.cards.length / Math.max(1, totalCount)) * 100)}%; background-color: ${col.color};"></div>
                 </div>
             </div>
             <div class="kanban-cards-dropzone" id="dropzone-${col.id}" data-stage-id="${col.id}" data-db-status="${col.db_status}"></div>
@@ -138,46 +182,48 @@ function renderKanbanBoard(columns, totalCount) {
         });
 
         boardContainer.appendChild(columnEl);
+        setupSortableOnDropzone(dropzoneEl);
+    });
 
-        // ==================================================================
-        // SORTABLE JS - ARRASTRE FLUIDO A 60 FPS
-        // ==================================================================
-        const sortable = new Sortable(dropzoneEl, {
-            group: "odoo_kanban_group",
-            animation: 180,
-            ghostClass: "sortable-ghost",
-            chosenClass: "sortable-chosen",
-            dragClass: "sortable-drag",
-            fallbackTolerance: 3,
-            scroll: true,
-            scrollSensitivity: 80,
-            scrollSpeed: 15,
-            bubbleScroll: true,
+    // 2. Renderizar Columna Fija a la Derecha (Terminadas / Liberado)
+    if (finishedColumn && fixedDockContainer) {
+        const formattedTotalFinished = `${(finishedColumn.total_monto || 0).toLocaleString('es-MX')} Pzs`;
 
-            onEnd: function (evt) {
-                const itemEl = evt.item;
-                const fromColId = evt.from.dataset.stageId;
-                const toColId = evt.to.dataset.stageId;
-                const reqId = itemEl.dataset.reqId;
-                const newDbStatus = evt.to.dataset.dbStatus;
+        fixedDockContainer.innerHTML = `
+            <div class="fixed-dock-banner">
+                <span>🎯 Arrastra aquí para Terminar OF</span>
+            </div>
+            <div class="column-header">
+                <div class="column-top-bar" style="background-color: #16A34A;"></div>
+                <div class="column-title-row">
+                    <span class="column-title">
+                        <span class="column-icon-badge" style="background-color: #16A34A; color: #FFFFFF;">${finishedColumn.icon}</span>
+                        <span class="column-title-text" style="color: #14532D !important;">${finishedColumn.short_title}</span>
+                    </span>
+                    <div class="column-actions">
+                        <span class="column-badge" style="background-color: #16A34A; border-color: #16A34A;" id="badge-${finishedColumn.id}">${finishedColumn.cards.length}</span>
+                    </div>
+                </div>
+                <div class="column-metrics-row">
+                    <span>Total Liberadas:</span>
+                    <span class="column-total" style="color: #16A34A !important;">${formattedTotalFinished}</span>
+                </div>
+                <div class="column-progress-bar">
+                    <div class="column-progress-fill" style="width: 100%; background-color: #16A34A;"></div>
+                </div>
+            </div>
+            <div class="kanban-cards-dropzone" id="dropzone-${finishedColumn.id}" data-stage-id="${finishedColumn.id}" data-db-status="${finishedColumn.db_status}"></div>
+        `;
 
-                // Si la tarjeta cambió de columna
-                if (fromColId !== toColId) {
-                    // Notificar inmediatamente a Python (Streamlit)
-                    sendValueToStreamlit({
-                        action: "move_stage",
-                        event_id: Date.now() + "_" + Math.random().toString(36).substring(2, 9),
-                        req_id: reqId,
-                        old_stage: fromColId,
-                        new_stage: toColId,
-                        new_db_status: newDbStatus
-                    });
-                }
-            }
+        const finishedDropzoneEl = fixedDockContainer.querySelector(".kanban-cards-dropzone");
+
+        finishedColumn.cards.forEach(card => {
+            const cardEl = createCardElement(card);
+            finishedDropzoneEl.appendChild(cardEl);
         });
 
-        sortableInstances.push(sortable);
-    });
+        setupSortableOnDropzone(finishedDropzoneEl);
+    }
 }
 
 // ==========================================================================
@@ -313,15 +359,23 @@ function updateTopNavStageChips(columns) {
     chipsContainer.innerHTML = "";
 
     columns.forEach(col => {
+        const isLiberado = col.db_status === "liberado";
         const chip = document.createElement("button");
-        chip.className = "nav-stage-chip";
-        chip.innerHTML = `<span>${col.icon}</span> <span>${col.short_title}</span> <strong style="background:#E2E8F0; padding:1px 5px; border-radius:10px; font-size:9.5px; color:#1E293B;">${col.cards.length}</strong>`;
-        chip.title = `Saltar directamente a la columna ${col.short_title}`;
+        chip.className = `nav-stage-chip ${isLiberado ? "chip-terminal" : ""}`;
+        chip.innerHTML = `<span>${col.icon}</span> <span>${col.short_title}</span> <strong style="background:${isLiberado ? '#DCFCE7' : '#E2E8F0'}; padding:1px 5px; border-radius:10px; font-size:9.5px; color:${isLiberado ? '#166534' : '#1E293B'};">${col.cards.length}</strong>`;
+        chip.title = isLiberado ? "Ver ventana fija de Terminadas / Liberado" : `Saltar directamente a la columna ${col.short_title}`;
         chip.onclick = (e) => {
             e.preventDefault();
-            const colEl = document.querySelector(`.kanban-column[data-stage-id="${col.id}"]`);
-            if (colEl) {
-                colEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+            if (isLiberado) {
+                const dockEl = document.getElementById("kanbanFixedDock");
+                if (dockEl) {
+                    dockEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                }
+            } else {
+                const colEl = document.querySelector(`.kanban-column[data-stage-id="${col.id}"]`);
+                if (colEl) {
+                    colEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                }
             }
         };
         chipsContainer.appendChild(chip);
