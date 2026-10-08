@@ -31,11 +31,13 @@ components.html("""
 """, height=0)
 
 # Sincronización inicial desde Google Cloud Storage (Persistencia Cloud Run)
-try:
-    from utils.gcs_sync import sync_db_from_gcs
-    sync_db_from_gcs()
-except Exception as _egcs:
-    print(f"[GCS] Aviso inicial: {_egcs}")
+if "_gcs_initial_sync" not in st.session_state:
+    try:
+        from utils.gcs_sync import sync_db_from_gcs
+        sync_db_from_gcs()
+        st.session_state["_gcs_initial_sync"] = True
+    except Exception as _egcs:
+        print(f"[GCS] Aviso inicial: {_egcs}")
 
 # Inicializar Base de Datos SQLite
 init_db()
@@ -93,6 +95,9 @@ def check_login():
         pass
 
 def login():
+    banner_p = Path(__file__).resolve().parent / "assets" / "banner.png"
+    if banner_p.exists():
+        st.image(str(banner_p), use_container_width=True)
     st.title("Acceso al Sistema - SIGRAMA")
     st.markdown("### Ingeniería que da resultados!!")
     
@@ -201,22 +206,16 @@ def render_sidebar():
     """
     st.sidebar.markdown(user_badge, unsafe_allow_html=True)
     
-    # Definición del menú con íconos y nombres mejorados
+    # Definición del menú con nuevo orden operativo SIGRAMA
     MENU_ITEMS = [
         {"key": "dashboard",       "icon": "📊", "label": "Panel de Control",            "admin_only": False},
-        {"key": "kanban",          "icon": "🗂️", "label": "Tablero Kanban",             "admin_only": False},
-        {"key": "global",          "icon": "🌐", "label": "Monitoreo Global",            "admin_only": False},
         {"key": "supervision_gcs", "icon": "🛰️", "label": "Supervisión Repositorio OF", "admin_only": False},
-        {"key": "etiquetas",       "icon": "🏷️", "label": "Supervisión Etiquetas (PO)", "admin_only": False},
-        None,  # separador
-        {"key": "consultas",       "icon": "📋", "label": "Consultas y Reportes",       "admin_only": False},
-        {"key": "planeacion",      "icon": "📅", "label": "Planeación de Corte",         "admin_only": False},
-        None,  # separador
+        {"key": "kanban",          "icon": "🗂️", "label": "Tablero Kanban",             "admin_only": False},
         {"key": "produccion",      "icon": "⚙️",  "label": "Control de Producción",     "admin_only": False},
-        {"key": "pronest_of",      "icon": "📑", "label": "Generador OF (ProNest)",    "admin_only": False},
+        {"key": "consultas",       "icon": "📋", "label": "Consultas y Reportes",       "admin_only": False},
+        {"key": "etiquetas",       "icon": "🏷️", "label": "Supervisión Etiquetas OF",   "admin_only": False},
+        {"key": "global",          "icon": "🌐", "label": "Monitoreo Global",            "admin_only": False},
         {"key": "manufactura",     "icon": "🤖", "label": "Manufactura Inteligente",    "admin_only": False},
-        {"key": "entarimado",      "icon": "📦", "label": "Entarimado y Embarque",      "admin_only": False},
-        {"key": "inventario_wip",  "icon": "🔍", "label": "Inventario WIP / Tarimas",    "admin_only": False},
         None,  # separador
         {"key": "mantenimiento",   "icon": "🛠️", "label": "Mantenimiento / Admin",       "admin_only": True},
         {"key": "sgc",             "icon": "📂", "label": "Documentos SGC",              "admin_only": True},
@@ -319,6 +318,22 @@ def render_sidebar():
     
     st.sidebar.markdown("---")
 
+    # Botón exclusivo para traer los datos más recientes desde Google Cloud Platform
+    if st.sidebar.button("☁️ Jalar Información de GCP", use_container_width=True, key="sidebar_pull_gcp_btn"):
+        with st.spinner("Descargando base de datos oficial y órdenes desde GCP..."):
+            try:
+                from utils.gcs_sync import pull_data_from_gcp
+                ok, msg = pull_data_from_gcp()
+                if ok:
+                    st.toast("✅ ¡Datos actualizados desde Google Cloud!", icon="☁️")
+                    st.balloons()
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.toast(f"⚠️ {msg}", icon="⚠️")
+            except Exception as ep:
+                st.toast(f"❌ Error al consultar GCP: {ep}", icon="🚨")
+
     col_out1, col_out2 = st.sidebar.columns(2)
     with col_out1:
         if st.button("🔄 Sincronizar", use_container_width=True, key="sidebar_sync_btn"):
@@ -327,6 +342,10 @@ def render_sidebar():
                     from utils.database import sync_and_push_db
                     res_commit, res_push = sync_and_push_db()
                     
+                    # También respaldar a GCS
+                    from utils.gcs_sync import push_db_to_gcs_async
+                    push_db_to_gcs_async()
+
                     if res_push.returncode == 0:
                         commit_out = res_commit.stdout.decode('utf-8', errors='ignore')
                         if "nothing to commit" in commit_out or res_commit.returncode != 0:
@@ -401,12 +420,11 @@ def main():
         choice = render_sidebar()
         
         # Banner Corporativo basado en Manual de Identidad
-        import os
-        banner_path = os.path.join(os.path.dirname(__file__), "assets", "banner.png")
+        banner_path = Path(__file__).resolve().parent / "assets" / "banner.png"
         
         # Fin de configuracion lateral (se elimino la opcion de personalizar recursos)
-        if os.path.exists(banner_path):
-            st.image(banner_path, use_container_width=True)
+        if banner_path.exists():
+            st.image(str(banner_path), use_container_width=True)
         else:
             banner_html = """
 <div style="background: linear-gradient(135deg, #000000 0%, #222222 100%); 
@@ -437,28 +455,20 @@ def main():
         
         if choice == "dashboard":
             view_dashboard()
-        elif choice == "kanban":
-            view_kanban_produccion()
-        elif choice == "global":
-            view_dashboard_global()
         elif choice == "supervision_gcs":
             view_supervision_gcs()
-        elif choice == "etiquetas":
-            view_dashboard_etiquetas()
-        elif choice == "consultas":
-            view_consultas()
-        elif choice == "planeacion":
-            view_planeacion()
+        elif choice == "kanban":
+            view_kanban_produccion()
         elif choice == "produccion":
             view_produccion()
-        elif choice == "pronest_of":
-            view_generador_of()
+        elif choice == "consultas":
+            view_consultas()
+        elif choice == "etiquetas":
+            view_dashboard_etiquetas()
+        elif choice == "global":
+            view_dashboard_global()
         elif choice == "manufactura":
             view_manufactura()
-        elif choice == "entarimado":
-            view_entarimado()
-        elif choice == "inventario_wip":
-            view_inventario_wip()
         elif choice == "mantenimiento":
             view_mantenimiento()
         elif choice == "sgc":

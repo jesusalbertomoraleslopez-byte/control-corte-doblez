@@ -63,11 +63,11 @@ def is_gcs_available() -> bool:
 # SINCRONIZACIÓN DE BASE DE DATOS (sigrama_database.xlsx)
 # =============================================================================
 
-def sync_db_from_gcs() -> bool:
+def sync_db_from_gcs(force: bool = False) -> bool:
     """
-    Descarga la base de datos de producción desde GCS al inicio si:
-    1. El archivo local no existe, o
-    2. GCS tiene una versión más reciente/completa.
+    Descarga la base de datos de producción desde GCS (gs://sigrama-corte-doblez-storage/database/sigrama_database.xlsx).
+    Si force=True o si la versión en GCS es más reciente que el archivo local, la descarga
+    y sincroniza automáticamente a SQLite.
     """
     b = get_bucket()
     if not b:
@@ -84,15 +84,22 @@ def sync_db_from_gcs() -> bool:
             print(f"[GCS_SYNC] Archivo en GCS demasiado pequeño ({gcs_size} bytes), ignorando.")
             return False
 
-        # Si el local no existe o el local es más pequeño/corrupto, descargar
-        descargar = False
+        descargar = force
         if not LOCAL_EXCEL_PATH.exists():
             descargar = True
-        else:
+        elif not force:
             local_size = LOCAL_EXCEL_PATH.stat().st_size
-            # Si el local tiene menos de 5KB o difiere significativamente
             if local_size < 5000:
                 descargar = True
+            elif blob.updated:
+                # Si el archivo en GCS tiene fecha posterior al local
+                try:
+                    gcs_mtime = blob.updated.timestamp()
+                    local_mtime = LOCAL_EXCEL_PATH.stat().st_mtime
+                    if gcs_mtime > (local_mtime + 5):
+                        descargar = True
+                except Exception:
+                    pass
 
         if descargar:
             print(f"[GCS_SYNC] Descargando {EXCEL_DB_NAME} desde GCS ({gcs_size} bytes)...")
@@ -104,6 +111,14 @@ def sync_db_from_gcs() -> bool:
                     with open(LOCAL_EXCEL_PATH, "wb") as f:
                         f.write(content)
                     print(f"[GCS_SYNC] Base de datos descargada y verificada exitosamente.")
+                    
+                    # Refrescar base de datos SQLite activa
+                    try:
+                        from utils.database import sync_excel_to_sqlite
+                        sync_excel_to_sqlite()
+                        print(f"[GCS_SYNC] Base SQLite local refrescada con datos de GCS.")
+                    except Exception as edb:
+                        print(f"[GCS_SYNC] Aviso al sincronizar SQLite: {edb}")
                     return True
             except Exception as ev:
                 print(f"[GCS_SYNC] Error de integridad al verificar Excel desde GCS: {ev}")
@@ -112,6 +127,16 @@ def sync_db_from_gcs() -> bool:
     except Exception as e:
         print(f"[GCS_SYNC] Error en sync_db_from_gcs: {e}")
         return False
+
+def pull_data_from_gcp() -> tuple[bool, str]:
+    """
+    Fuerza la descarga de la base de datos oficial y manifiesto desde GCP.
+    Retorna (éxito, mensaje).
+    """
+    ok = sync_db_from_gcs(force=True)
+    if ok:
+        return True, "Base de datos y órdenes actualizadas exitosamente desde GCP."
+    return False, "No se pudo descargar la información de GCP. Verifique su conexión a Internet o credenciales."
 
 def push_db_to_gcs() -> bool:
     """Sube el archivo sigrama_database.xlsx actual a GCS."""
