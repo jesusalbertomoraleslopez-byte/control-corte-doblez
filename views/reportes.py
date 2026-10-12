@@ -456,55 +456,644 @@ def view_reportes():
     with st.spinner("Calculando WIP en tiempo real..."):
         wip_data = get_global_wip_for_ofs(of_list)
     
+    relevant_procs = [p for p in PROCESSES if p != "Ingenieria"]
+    process_icons = {
+        "Corte": "✂️",
+        "Rebabeo": "⚙️",
+        "Doblez": "📐",
+        "Barrenado": "🔩",
+        "Pintura": "🎨",
+        "Liberado": "✅",
+        "Empaque": "📦",
+        "TOTAL_PISO": "🏭",
+        "TOTAL_GENERAL": "📦"
+    }
+    friendly_names = {
+        "Corte": "Piezas por cortar",
+        "Rebabeo": "Piezas por rebabear",
+        "Doblez": "Piezas por doblar",
+        "Barrenado": "Piezas por barrenar",
+        "Pintura": "Piezas por pintar",
+        "Liberado": "Piezas por liberar",
+        "Empaque": "Piezas por empacar",
+        "TOTAL_PISO": "Total en Piso (Excluyendo Corte)",
+        "TOTAL_GENERAL": "Total de las OF Seleccionadas"
+    }
+    inv_friendly_names = {v: k for k, v in friendly_names.items()}
+
+    # ── Función auxiliar: Detalle enriquecido de piezas en WIP con metadatos de OF y Nidos ──
+    def get_wip_pieces_rich_detail(ofs_target, area_target):
+        if area_target == "TOTAL_PISO":
+            areas_to_query = [p for p in relevant_procs if p != "Corte"]
+        elif area_target == "TOTAL_GENERAL":
+            areas_to_query = list(relevant_procs)
+        else:
+            areas_to_query = [area_target]
+
+        conn = get_connection()
+        df_meta = pd.read_sql_query("SELECT * FROM ordenes", conn)
+        df_pzs_nidos = pd.read_sql_query(
+            "SELECT of_number, no_pieza, GROUP_CONCAT(DISTINCT nido) as nidos_str, MAX(ruta) as ruta_str "
+            "FROM piezas GROUP BY of_number, no_pieza",
+            conn
+        )
+        conn.close()
+
+        frames = []
+        for ar in areas_to_query:
+            df_ar = get_wip_pieces_detail(ofs_target, ar)
+            if not df_ar.empty:
+                df_ar = df_ar.copy()
+                df_ar["Área"] = ar
+                df_ar["Estación"] = friendly_names.get(ar, ar)
+                frames.append(df_ar)
+
+        if not frames:
+            return pd.DataFrame(columns=[
+                "Área", "Estación", "OF", "Proyecto", "Proyecto Cliente", "PO",
+                "Prioridad", "Calibre", "Nidos", "No. Pieza", "Descripción",
+                "Cantidad WIP", "Ruta"
+            ])
+
+        df_all = pd.concat(frames, ignore_index=True)
+        if not df_meta.empty:
+            cols_meta = [c for c in ["of_number", "proyecto", "proyecto_cliente", "po", "prioridad", "calibre", "fecha"] if c in df_meta.columns]
+            df_all = df_all.merge(df_meta[cols_meta], left_on="OF", right_on="of_number", how="left")
+            if "of_number" in df_all.columns:
+                df_all.drop(columns=["of_number"], inplace=True)
+
+        if not df_pzs_nidos.empty:
+            df_all = df_all.merge(
+                df_pzs_nidos,
+                left_on=["OF", "No. Pieza"],
+                right_on=["of_number", "no_pieza"],
+                how="left"
+            )
+            for col_drop in ["of_number", "no_pieza"]:
+                if col_drop in df_all.columns:
+                    df_all.drop(columns=[col_drop], inplace=True)
+
+        df_all.rename(columns={
+            "proyecto": "Proyecto",
+            "proyecto_cliente": "Proyecto Cliente",
+            "po": "PO",
+            "prioridad": "Prioridad",
+            "calibre": "Calibre",
+            "fecha": "Fecha OF",
+            "nidos_str": "Nidos",
+            "ruta_str": "Ruta"
+        }, inplace=True)
+
+        for col_fill in ["Proyecto", "Proyecto Cliente", "PO", "Prioridad", "Calibre", "Nidos", "Ruta"]:
+            if col_fill not in df_all.columns:
+                df_all[col_fill] = "—"
+            else:
+                df_all[col_fill] = df_all[col_fill].fillna("—").replace("", "—")
+
+        df_all["Cantidad WIP"] = pd.to_numeric(df_all["Cantidad WIP"], errors="coerce").fillna(0).astype(int)
+        return df_all
+
+    # ── Función auxiliar: Generador de Excel Multi-Hoja con Pareto 80/20 ──
+    def build_drilldown_pareto_excel(df_vista_actual, df_pareto_sku, df_detalle_of, df_resumen_of, titulo_estacion):
+        import io
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            if not df_vista_actual.empty:
+                df_vista_actual.to_excel(writer, sheet_name="Vista Actual", index=False)
+                style_excel_sheet(writer, df_vista_actual, "Vista Actual")
+            if not df_pareto_sku.empty:
+                df_pareto_sku.to_excel(writer, sheet_name="Pareto Piezas (80-20)", index=False)
+                style_excel_sheet(writer, df_pareto_sku, "Pareto Piezas (80-20)")
+            if not df_detalle_of.empty:
+                df_detalle_of.to_excel(writer, sheet_name="Detalle por OF y Pieza", index=False)
+                style_excel_sheet(writer, df_detalle_of, "Detalle por OF y Pieza")
+            if not df_resumen_of.empty:
+                df_resumen_of.to_excel(writer, sheet_name="Resumen por OF", index=False)
+                style_excel_sheet(writer, df_resumen_of, "Resumen por OF")
+        return output.getvalue()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PANTALLA NUEVA ESTILO ODOO: DETALLE + TABLA + PARETO (80/20) + EXCEL
+    # ══════════════════════════════════════════════════════════════════════════
+    active_drill_area = st.session_state.get("wip_drilldown_area", None)
+
+    if active_drill_area:
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+
+        icon_act = process_icons.get(active_drill_area, "🏭")
+        label_act = friendly_names.get(active_drill_area, active_drill_area)
+
+        # Barra superior estilo Odoo (Breadcrumb + Botón Regresar + Selector Rápido)
+        col_back, col_bread, col_switch = st.columns([1.1, 2.3, 1.6])
+        with col_back:
+            if st.button("⬅️ Volver al Dashboard WIP", type="primary", use_container_width=True, key="btn_back_wip_main"):
+                st.session_state["wip_drilldown_area"] = None
+                st.session_state.pop("wip_pareto_click_filter", None)
+                st.rerun()
+
+        with col_bread:
+            st.markdown(
+                f"""
+                <div style="background:#f8f9fa; border:1px solid #dee2e6; border-left:5px solid #EC2024;
+                            border-radius:8px; padding:10px 16px; display:flex; align-items:center; gap:8px;">
+                    <span style="color:#6c757d; font-weight:600; font-size:0.95rem;">📊 Dashboard WIP Global</span>
+                    <span style="color:#adb5bd; font-weight:bold;">/</span>
+                    <span style="color:#111; font-weight:900; font-size:1.1rem; font-family:'Montserrat',sans-serif;">
+                        {icon_act} {label_act.upper()}
+                    </span>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+        with col_switch:
+            switch_keys = relevant_procs + ["TOTAL_PISO", "TOTAL_GENERAL"]
+            def _fmt_switch(k):
+                cnt = (
+                    sum(v for ak, v in wip_data.items() if ak not in ["Corte", "Ingenieria"])
+                    if k == "TOTAL_PISO"
+                    else (
+                        sum(wip_data.get(p, 0) for p in relevant_procs)
+                        if k == "TOTAL_GENERAL"
+                        else wip_data.get(k, 0)
+                    )
+                )
+                return f"{process_icons.get(k, '🏭')} {friendly_names.get(k, k)} ({cnt:,} pzs)"
+
+            idx_curr = switch_keys.index(active_drill_area) if active_drill_area in switch_keys else 0
+            new_area_sel = st.selectbox(
+                "Cambiar estación rápidamente:",
+                options=switch_keys,
+                index=idx_curr,
+                format_func=_fmt_switch,
+                label_visibility="collapsed",
+                key="odoo_quick_area_switcher"
+            )
+            if new_area_sel != active_drill_area:
+                st.session_state["wip_drilldown_area"] = new_area_sel
+                st.session_state.pop("wip_pareto_click_filter", None)
+                st.rerun()
+
+        # Obtener datos detallados para el área seleccionada
+        df_rich = get_wip_pieces_rich_detail(of_list, active_drill_area)
+
+        if df_rich.empty:
+            st.info(f"✅ Actualmente no hay piezas pendientes en **{label_act}** para las OFs seleccionadas.")
+            return
+
+        # Calcular tablas base:
+        # 1) Pareto agrupado por Pieza (SKU)
+        df_pareto_sku = (
+            df_rich.groupby(["No. Pieza", "Descripción"], as_index=False)
+            .agg(
+                Cantidad_WIP=("Cantidad WIP", "sum"),
+                Cant_OFs=("OF", "nunique"),
+                OFs_Involucradas=("OF", lambda s: ", ".join(sorted(set(str(x) for x in s)))),
+                Proyectos=("Proyecto", lambda s: ", ".join(sorted(set(str(x) for x in s if str(x) != "—")))),
+                Calibres=("Calibre", lambda s: ", ".join(sorted(set(str(x) for x in s if str(x) != "—"))))
+            )
+            .sort_values("Cantidad_WIP", ascending=False)
+            .reset_index(drop=True)
+        )
+        total_wip_area = int(df_pareto_sku["Cantidad_WIP"].sum())
+        df_pareto_sku["Ranking #"] = df_pareto_sku.index + 1
+        df_pareto_sku["% Participación"] = (df_pareto_sku["Cantidad_WIP"] / max(1, total_wip_area) * 100).round(2)
+        df_pareto_sku["% Acumulado"] = df_pareto_sku["% Participación"].cumsum().round(2).clip(upper=100.0)
+
+        def _clasificar_abc(pct_acum, idx_row):
+            if idx_row == 0 or pct_acum <= 80.0:
+                return "🔴 A - Vital (80%)"
+            elif pct_acum <= 95.0:
+                return "🟠 B - Importante (15%)"
+            return "🔵 C - Trivial (5%)"
+
+        df_pareto_sku["Clase Pareto"] = [
+            _clasificar_abc(row["% Acumulado"], idx) for idx, row in df_pareto_sku.iterrows()
+        ]
+        df_pareto_sku.rename(columns={
+            "Cantidad_WIP": "Cantidad WIP",
+            "Cant_OFs": "N° OFs",
+            "OFs_Involucradas": "OFs Involucradas"
+        }, inplace=True)
+
+        # Mapear la Clase Pareto al detalle por OF y Pieza
+        sku_to_clase = df_pareto_sku.set_index("No. Pieza")["Clase Pareto"].to_dict()
+        df_rich = df_rich.sort_values("Cantidad WIP", ascending=False).reset_index(drop=True)
+        df_rich["Ranking #"] = df_rich.index + 1
+        df_rich["% del WIP"] = (df_rich["Cantidad WIP"] / max(1, total_wip_area) * 100).round(2)
+        df_rich["% Acumulado"] = df_rich["% del WIP"].cumsum().round(2).clip(upper=100.0)
+        df_rich["Clase Pareto"] = df_rich["No. Pieza"].map(sku_to_clase).fillna("🔵 C - Trivial (5%)")
+
+        # 2) Consolidado por OF
+        df_resumen_of = (
+            df_rich.groupby(["OF", "Proyecto", "Proyecto Cliente", "PO", "Prioridad", "Calibre"], as_index=False)
+            .agg(
+                SKUs_Distintos=("No. Pieza", "nunique"),
+                Cantidad_WIP=("Cantidad WIP", "sum")
+            )
+            .sort_values("Cantidad_WIP", ascending=False)
+            .reset_index(drop=True)
+        )
+        df_resumen_of["Ranking #"] = df_resumen_of.index + 1
+        df_resumen_of["% Participación"] = (df_resumen_of["Cantidad_WIP"] / max(1, total_wip_area) * 100).round(2)
+        df_resumen_of["% Acumulado"] = df_resumen_of["% Participación"].cumsum().round(2).clip(upper=100.0)
+        df_resumen_of.rename(columns={"SKUs_Distintos": "Piezas Distintas (SKUs)", "Cantidad_WIP": "Cantidad WIP"}, inplace=True)
+
+        # ── KPIs Superiores de la Estación ──
+        total_skus = len(df_pareto_sku)
+        total_ofs_area = df_rich["OF"].nunique()
+        top1_row = df_pareto_sku.iloc[0]
+        skus_clase_a = len(df_pareto_sku[df_pareto_sku["Clase Pareto"].str.startswith("🔴")])
+        pct_skus_a = (skus_clase_a / max(1, total_skus) * 100)
+
+        k1, k2, k3, k4, k5 = st.columns(5)
+        kpi_cards_data = [
+            (k1, "PIEZAS EN WIP", f"{total_wip_area:,}", f"Estación: {label_act}", "#EC2024"),
+            (k2, "PIEZAS DISTINTAS (SKUs)", f"{total_skus:,}", "Números de parte únicos", "#0056b3"),
+            (k3, "ÓRDENES (OFs)", f"{total_ofs_area:,}", "Con material pendiente", "#6f42c1"),
+            (k4, "PIEZA #1 MAYOR VOLUMEN", f"{int(top1_row['Cantidad WIP']):,} pzs", f"{top1_row['No. Pieza']} ({top1_row['% Participación']:.1f}%)", "#fd7e14"),
+            (k5, "LEY DE PARETO (80/20)", f"{skus_clase_a} de {total_skus} SKUs", f"{pct_skus_a:.0f}% de piezas = 80% del WIP", "#28a745"),
+        ]
+        for col_k, k_title, k_val, k_sub, k_color in kpi_cards_data:
+            with col_k:
+                st.markdown(
+                    f"""
+                    <div style="background:#ffffff; border:1px solid #e2e8f0; border-top:4px solid {k_color};
+                                border-radius:8px; padding:12px 10px; text-align:center; box-shadow:0 2px 5px rgba(0,0,0,0.05); margin-top:8px; margin-bottom:10px;">
+                        <div style="font-size:0.74rem; color:#64748b; font-weight:800; text-transform:uppercase;">{k_title}</div>
+                        <div style="font-size:1.75rem; font-weight:900; color:{k_color}; font-family:'Montserrat',sans-serif; margin:3px 0;">{k_val}</div>
+                        <div style="font-size:0.75rem; color:#334155; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{k_sub}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+        # ── SECCIÓN 1: GRÁFICO DE PARETO INTERACTIVO (CANTIDAD Y PIEZAS MÁS IMPORTANTES) ──
+        st.markdown("### 📊 Análisis de Pareto (80/20) — Piezas y Órdenes Más Importantes por Cantidad")
+        col_p_dim, col_p_top = st.columns([2.2, 1.3])
+        with col_p_dim:
+            pareto_dim = st.radio(
+                "Agrupar Gráfico de Pareto por:",
+                [
+                    "🔩 Por Pieza / No. Parte (SKUs más importantes)",
+                    "📁 Por Orden de Fabricación (OF)",
+                    "📂 Por Proyecto / PO",
+                    "📏 Por Calibre"
+                ],
+                horizontal=True,
+                key="odoo_pareto_dim_radio"
+            )
+        with col_p_top:
+            top_n_choice = st.select_slider(
+                "Cantidad de barras a mostrar en el Pareto:",
+                options=["Top 10", "Top 15", "Top 25", "Top 40", "Todas"],
+                value="Top 15",
+                key="odoo_pareto_top_slider"
+            )
+
+        if pareto_dim.startswith("🔩"):
+            df_p_plot = df_pareto_sku.copy()
+            df_p_plot["Etiqueta"] = df_p_plot["No. Pieza"].astype(str)
+            df_p_plot["Hover_Extra"] = df_p_plot["Descripción"].astype(str) + " | OFs: " + df_p_plot["OFs Involucradas"].astype(str)
+            x_axis_title = "Número de Parte (Pieza)"
+        elif pareto_dim.startswith("📁"):
+            df_p_plot = df_resumen_of.copy()
+            df_p_plot["Etiqueta"] = df_p_plot["OF"].astype(str)
+            df_p_plot["Hover_Extra"] = "Proyecto: " + df_p_plot["Proyecto"].astype(str) + " | PO: " + df_p_plot["PO"].astype(str)
+            df_p_plot["Clase Pareto"] = [
+                _clasificar_abc(row["% Acumulado"], idx) for idx, row in df_p_plot.iterrows()
+            ]
+            x_axis_title = "Orden de Fabricación (OF)"
+        elif pareto_dim.startswith("📂"):
+            df_p_plot = (
+                df_rich.groupby(["Proyecto", "PO"], as_index=False)["Cantidad WIP"]
+                .sum()
+                .sort_values("Cantidad WIP", ascending=False)
+                .reset_index(drop=True)
+            )
+            df_p_plot["% Participación"] = (df_p_plot["Cantidad WIP"] / max(1, total_wip_area) * 100).round(2)
+            df_p_plot["% Acumulado"] = df_p_plot["% Participación"].cumsum().round(2).clip(upper=100.0)
+            df_p_plot["Clase Pareto"] = [_clasificar_abc(r["% Acumulado"], i) for i, r in df_p_plot.iterrows()]
+            df_p_plot["Etiqueta"] = df_p_plot["Proyecto"].astype(str) + " (" + df_p_plot["PO"].astype(str) + ")"
+            df_p_plot["Hover_Extra"] = df_p_plot["Etiqueta"]
+            x_axis_title = "Proyecto / PO"
+        else:
+            df_p_plot = (
+                df_rich.groupby("Calibre", as_index=False)["Cantidad WIP"]
+                .sum()
+                .sort_values("Cantidad WIP", ascending=False)
+                .reset_index(drop=True)
+            )
+            df_p_plot["% Participación"] = (df_p_plot["Cantidad WIP"] / max(1, total_wip_area) * 100).round(2)
+            df_p_plot["% Acumulado"] = df_p_plot["% Participación"].cumsum().round(2).clip(upper=100.0)
+            df_p_plot["Clase Pareto"] = [_clasificar_abc(r["% Acumulado"], i) for i, r in df_p_plot.iterrows()]
+            df_p_plot["Etiqueta"] = df_p_plot["Calibre"].astype(str)
+            df_p_plot["Hover_Extra"] = "Calibre: " + df_p_plot["Calibre"].astype(str)
+            x_axis_title = "Calibre"
+
+        if top_n_choice != "Todas":
+            n_limit = int(top_n_choice.replace("Top ", ""))
+            df_p_view = df_p_plot.head(n_limit).copy()
+        else:
+            df_p_view = df_p_plot.copy()
+
+        bar_colors = [
+            "#EC2024" if str(c).startswith("🔴") else ("#FF8C00" if str(c).startswith("🟠") else "#6C757D")
+            for c in df_p_view["Clase Pareto"]
+        ]
+
+        fig_pareto = make_subplots(specs=[[{"secondary_y": True}]])
+        fig_pareto.add_trace(
+            go.Bar(
+                x=df_p_view["Etiqueta"],
+                y=df_p_view["Cantidad WIP"],
+                name="Cantidad Piezas (WIP)",
+                marker_color=bar_colors,
+                text=df_p_view["Cantidad WIP"].apply(lambda v: f"{int(v):,}"),
+                textposition="outside",
+                customdata=df_p_view[["Hover_Extra", "% Participación", "% Acumulado", "Clase Pareto"]].values,
+                hovertemplate=(
+                    "<b>%{x}</b><br>"
+                    "%{customdata[0]}<br>"
+                    "<b>Cantidad WIP:</b> %{y:,} pzs<br>"
+                    "<b>% del Total:</b> %{customdata[1]:.1f}%<br>"
+                    "<b>% Acumulado:</b> %{customdata[2]:.1f}%<br>"
+                    "<b>Clasificación:</b> %{customdata[3]}<extra></extra>"
+                )
+            ),
+            secondary_y=False
+        )
+        fig_pareto.add_trace(
+            go.Scatter(
+                x=df_p_view["Etiqueta"],
+                y=df_p_view["% Acumulado"],
+                name="% Acumulado (Curva Pareto)",
+                mode="lines+markers+text",
+                text=df_p_view["% Acumulado"].apply(lambda v: f"{v:.0f}%"),
+                textposition="top center",
+                line=dict(color="#111111", width=3),
+                marker=dict(size=8, color="#FFD700", line=dict(color="#111111", width=2)),
+                hovertemplate="<b>%{x}</b><br>% Acumulado: <b>%{y:.1f}%</b><extra></extra>"
+            ),
+            secondary_y=True
+        )
+        # Línea de referencia 80%
+        fig_pareto.add_hline(
+            y=80,
+            line_dash="dash",
+            line_color="#28a745",
+            line_width=2,
+            annotation_text="Umbral 80% Pareto (Clase A)",
+            annotation_position="bottom right",
+            secondary_y=True
+        )
+        max_y_bar = int(df_p_view["Cantidad WIP"].max()) if not df_p_view.empty else 10
+        fig_pareto.update_layout(
+            title=f"<b>Gráfico de Pareto 80/20 — {label_act} ({len(df_p_view)} mostrados de {len(df_p_plot)})</b>  <span style='font-size:12px;color:#555;'>[🔴 Clase A (0-80%) | 🟠 Clase B (80-95%) | 🔵 Clase C (95-100%)]</span>",
+            xaxis_title=x_axis_title,
+            height=430,
+            margin=dict(t=55, b=70, l=50, r=50),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode="x unified",
+            xaxis_tickangle=-30
+        )
+        fig_pareto.update_yaxes(title_text="<b>Cantidad de Piezas (WIP)</b>", range=[0, max_y_bar * 1.18], secondary_y=False)
+        fig_pareto.update_yaxes(title_text="<b>% Acumulado</b>", range=[0, 108], ticksuffix="%", secondary_y=True)
+
+        st.plotly_chart(fig_pareto, use_container_width=True, key="odoo_drilldown_pareto_chart")
+
+        # ── SECCIÓN 2: TABLA INTERACTIVA CON MÚLTIPLES PRESENTACIONES, ORDENAMIENTOS Y DESCARGA EXCEL ──
+        st.markdown("---")
+        st.markdown("### 📋 Tabla de Detalle, Presentaciones y Descarga en Excel")
+
+        col_pres, col_sort, col_abc, col_search = st.columns([1.6, 1.4, 1.1, 1.4])
+        with col_pres:
+            presentacion_sel = st.selectbox(
+                "📑 Presentación de la Tabla:",
+                [
+                    "🔩 Pareto por Pieza / SKU (Piezas más importantes por cantidad)",
+                    "📋 Detalle Completo (Por OF, Nido y Pieza)",
+                    "📁 Consolidado por Orden de Fabricación (OF)",
+                    "🏷️ Consolidado por Proyecto / PO y Calibre"
+                ],
+                index=0,
+                key="odoo_table_presentation"
+            )
+        with col_sort:
+            orden_sel = st.selectbox(
+                "🔃 Ordenar por:",
+                [
+                    "🔥 Mayor a Menor Cantidad WIP (Pareto)",
+                    "❄️ Menor a Mayor Cantidad WIP",
+                    "🔤 Número de Pieza / Clave (A-Z)",
+                    "📝 Descripción / Proyecto (A-Z)",
+                    "🔢 Orden de Fabricación (OF)"
+                ],
+                index=0,
+                key="odoo_table_sort"
+            )
+        with col_abc:
+            filtro_abc = st.selectbox(
+                "🎯 Filtrar Clase Pareto:",
+                [
+                    "Todas las Clases",
+                    "🔴 Solo Clase A (Vitales 80%)",
+                    "🟠 Solo Clase B (Importantes 15%)",
+                    "🔵 Solo Clase C (Triviales 5%)"
+                ],
+                index=0,
+                key="odoo_table_abc_filter"
+            )
+        with col_search:
+            texto_buscar = st.text_input(
+                "🔍 Buscar Pieza / Descripción / OF / PO:",
+                value="",
+                placeholder="Ej. 12-D-6030, OF 00127...",
+                key="odoo_table_search"
+            )
+
+        # Seleccionar DataFrame según la presentación elegida
+        if presentacion_sel.startswith("🔩"):
+            df_table_view = df_pareto_sku[[
+                "Ranking #", "Clase Pareto", "No. Pieza", "Descripción",
+                "Cantidad WIP", "% Participación", "% Acumulado",
+                "N° OFs", "OFs Involucradas", "Proyectos", "Calibres"
+            ]].copy()
+        elif presentacion_sel.startswith("📋"):
+            cols_det = [
+                "Ranking #", "Clase Pareto", "OF", "Proyecto", "Proyecto Cliente",
+                "PO", "Prioridad", "Calibre", "Nidos", "No. Pieza", "Descripción",
+                "Cantidad WIP", "% del WIP", "% Acumulado", "Ruta"
+            ]
+            if active_drill_area in ["TOTAL_PISO", "TOTAL_GENERAL"]:
+                cols_det.insert(2, "Estación")
+            df_table_view = df_rich[[c for c in cols_det if c in df_rich.columns]].copy()
+        elif presentacion_sel.startswith("📁"):
+            df_res_of_copy = df_resumen_of.copy()
+            df_res_of_copy["Clase Pareto"] = [
+                _clasificar_abc(r["% Acumulado"], i) for i, r in df_res_of_copy.iterrows()
+            ]
+            df_table_view = df_res_of_copy[[
+                "Ranking #", "Clase Pareto", "OF", "Proyecto", "Proyecto Cliente",
+                "PO", "Prioridad", "Calibre", "Piezas Distintas (SKUs)",
+                "Cantidad WIP", "% Participación", "% Acumulado"
+            ]].copy()
+        else:
+            df_proy_cal = (
+                df_rich.groupby(["Proyecto", "Proyecto Cliente", "PO", "Calibre"], as_index=False)
+                .agg(
+                    OFs=("OF", "nunique"),
+                    SKUs=("No. Pieza", "nunique"),
+                    Cantidad_WIP=("Cantidad WIP", "sum")
+                )
+                .sort_values("Cantidad_WIP", ascending=False)
+                .reset_index(drop=True)
+            )
+            df_proy_cal["Ranking #"] = df_proy_cal.index + 1
+            df_proy_cal["% Participación"] = (df_proy_cal["Cantidad_WIP"] / max(1, total_wip_area) * 100).round(2)
+            df_proy_cal["% Acumulado"] = df_proy_cal["% Participación"].cumsum().round(2).clip(upper=100.0)
+            df_proy_cal["Clase Pareto"] = [_clasificar_abc(r["% Acumulado"], i) for i, r in df_proy_cal.iterrows()]
+            df_proy_cal.rename(columns={"Cantidad_WIP": "Cantidad WIP"}, inplace=True)
+            df_table_view = df_proy_cal[[
+                "Ranking #", "Clase Pareto", "Proyecto", "Proyecto Cliente", "PO",
+                "Calibre", "OFs", "SKUs", "Cantidad WIP", "% Participación", "% Acumulado"
+            ]].copy()
+
+        # Aplicar filtro Clase ABC
+        if filtro_abc != "Todas las Clases" and "Clase Pareto" in df_table_view.columns:
+            prefix_abc = filtro_abc.split()[0]  # 🔴, 🟠, 🔵
+            df_table_view = df_table_view[df_table_view["Clase Pareto"].str.startswith(prefix_abc)]
+
+        # Aplicar buscador de texto
+        if texto_buscar.strip():
+            q_str = texto_buscar.strip().lower()
+            mask_txt = df_table_view.astype(str).apply(lambda col: col.str.lower().str.contains(q_str, na=False)).any(axis=1)
+            df_table_view = df_table_view[mask_txt]
+
+        # Aplicar ordenamiento dinámico
+        if orden_sel.startswith("🔥") and "Cantidad WIP" in df_table_view.columns:
+            df_table_view = df_table_view.sort_values("Cantidad WIP", ascending=False)
+        elif orden_sel.startswith("❄️") and "Cantidad WIP" in df_table_view.columns:
+            df_table_view = df_table_view.sort_values("Cantidad WIP", ascending=True)
+        elif orden_sel.startswith("🔤"):
+            col_key = "No. Pieza" if "No. Pieza" in df_table_view.columns else ("OF" if "OF" in df_table_view.columns else "Proyecto")
+            df_table_view = df_table_view.sort_values(col_key, ascending=True)
+        elif orden_sel.startswith("📝"):
+            col_desc = "Descripción" if "Descripción" in df_table_view.columns else "Proyecto"
+            df_table_view = df_table_view.sort_values(col_desc, ascending=True)
+        elif orden_sel.startswith("🔢"):
+            col_of = "OF" if "OF" in df_table_view.columns else ("OFs Involucradas" if "OFs Involucradas" in df_table_view.columns else "Ranking #")
+            df_table_view = df_table_view.sort_values(col_of, ascending=True)
+
+        # Botones de descarga Excel (.xlsx) y CSV arriba y abajo de la tabla
+        excel_bytes_drill = build_drilldown_pareto_excel(
+            df_vista_actual=df_table_view,
+            df_pareto_sku=df_pareto_sku,
+            df_detalle_of=df_rich,
+            df_resumen_of=df_resumen_of,
+            titulo_estacion=label_act
+        )
+        csv_bytes_drill = df_table_view.to_csv(index=False).encode("utf-8-sig")
+        clean_area_fn = active_drill_area.replace(" ", "_")
+
+        col_btn_xl, col_btn_csv, col_info_cnt = st.columns([1.8, 1.4, 1.8])
+        with col_btn_xl:
+            st.download_button(
+                label=f"📥 Descargar Excel con Pareto y Detalle ({label_act}) [.xlsx]",
+                data=excel_bytes_drill,
+                file_name=f"Pareto_y_Detalle_WIP_{clean_area_fn}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True,
+                key="btn_dl_excel_drill_top"
+            )
+        with col_btn_csv:
+            st.download_button(
+                label="📄 Descargar Tabla Actual (.csv)",
+                data=csv_bytes_drill,
+                file_name=f"Tabla_WIP_{clean_area_fn}.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="btn_dl_csv_drill_top"
+            )
+        with col_info_cnt:
+            suma_filtrada = int(df_table_view["Cantidad WIP"].sum()) if "Cantidad WIP" in df_table_view.columns else 0
+            st.markdown(
+                f"<div style='padding:8px 12px; background:#f1f5f9; border-radius:6px; text-align:right; font-weight:700; color:#1e293b;'>"
+                f"Mostrando <b>{len(df_table_view):,}</b> registros | Total filtrado: <span style='color:#EC2024;font-size:1.05rem;'>{suma_filtrada:,} pzs</span>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+
+        # Configurar columnas visuales para st.dataframe
+        col_cfg = {}
+        if "% Participación" in df_table_view.columns:
+            col_cfg["% Participación"] = st.column_config.ProgressColumn(
+                "% del WIP", min_value=0, max_value=100, format="%.1f%%"
+            )
+        if "% del WIP" in df_table_view.columns:
+            col_cfg["% del WIP"] = st.column_config.ProgressColumn(
+                "% del WIP", min_value=0, max_value=100, format="%.1f%%"
+            )
+        if "% Acumulado" in df_table_view.columns:
+            col_cfg["% Acumulado"] = st.column_config.NumberColumn(
+                "% Acumulado (Pareto)", format="%.1f%%"
+            )
+        if "Cantidad WIP" in df_table_view.columns:
+            col_cfg["Cantidad WIP"] = st.column_config.NumberColumn(
+                "Cantidad WIP (Pzs)", format="%d"
+            )
+
+        st.dataframe(
+            df_table_view,
+            use_container_width=True,
+            height=460,
+            hide_index=True,
+            column_config=col_cfg
+        )
+        return
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PANTALLA PRINCIPAL: DASHBOARD DE REPORTES Y WIP GLOBAL (TARJETAS CLICABLES)
+    # ══════════════════════════════════════════════════════════════════════════
     if wip_data and any(v > 0 for v in wip_data.values()) or True:
         st.markdown(f"### 🏭 Piezas Disponibles (WIP) por Área para {display_name}")
-        st.markdown("Estos números reflejan las piezas exactas que están físicamente listas para trabajarse en cada estación.")
+        st.markdown("💡 **Tip estilo Odoo:** Da clic directamente sobre cualquier **tarjeta de piezas (ej. 709 Piezas por cortar)** o sobre las **barras de la gráfica** para abrir la pantalla con el **Detalle en Tabla, Gráfico de Pareto (80/20) y Descarga en Excel**.")
         
         # Calcular Total en Piso excluyendo Corte
         total_piso = sum(v for k, v in wip_data.items() if k not in ["Corte", "Ingenieria"])
-        
-        relevant_procs = [p for p in PROCESSES if p != "Ingenieria"]
         total_general = sum(wip_data.get(p, 0) for p in relevant_procs)
         pct_piso = (total_piso / total_general * 100) if total_general > 0 else 0
         
         st.markdown(
             f'''
-            <div style="background-color: #e6f3ff; border-top: 5px solid #0056b3; padding: 20px; border-radius: 8px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; justify-content: space-around; align-items: center; position: relative;">
-                <div style="text-align: center; width: 45%;">
+            <div style="background-color: #e6f3ff; border-top: 5px solid #0056b3; padding: 20px; border-radius: 8px; margin-bottom: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; justify-content: space-around; align-items: center; position: relative;">
+                <div data-drill-label="Ver Detalle en Piso" style="text-align: center; width: 45%; cursor: pointer; transition: transform 0.15s;" title="Clic para abrir Detalle y Pareto de Total en Piso">
                     <div style="position: absolute; top: 10px; left: 10px; background-color: #cce5ff; color: #004085; padding: 2px 8px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);">{pct_piso:.1f}%</div>
                     <p style="margin: 0; font-size: 1.1rem; color: #555; font-weight: bold; text-transform: uppercase;">🏭 TOTAL EN PISO (EXCLUYENDO CORTE)</p>
                     <div style="margin: 5px 0 0 0; font-size: 4rem; font-weight: 900; color: #0056b3;">{total_piso}</div>
                 </div>
                 <div style="width: 2px; height: 80px; background-color: #b3d7ff;"></div>
-                <div style="text-align: center; width: 45%;">
+                <div data-drill-label="Ver Detalle Total OFs" style="text-align: center; width: 45%; cursor: pointer; transition: transform 0.15s;" title="Clic para abrir Detalle y Pareto Total">
                     <p style="margin: 0; font-size: 1.1rem; color: #333; font-weight: bold; text-transform: uppercase;">📦 TOTAL DE LAS OF SELECCIONADAS</p>
                     <div style="margin: 5px 0 0 0; font-size: 4rem; font-weight: 900; color: #111;">{total_general}</div>
                 </div>
             </div>
             ''', unsafe_allow_html=True
         )
-        
+        col_top_b1, col_top_b2 = st.columns(2)
+        with col_top_b1:
+            if st.button(f"🔍 Ver Detalle en Piso ({total_piso:,} pzs) — Tabla y Pareto", key="btn_drill_total_piso", use_container_width=True):
+                st.session_state["wip_drilldown_area"] = "TOTAL_PISO"
+                st.rerun()
+        with col_top_b2:
+            if st.button(f"🔍 Ver Detalle Total OFs ({total_general:,} pzs) — Tabla y Pareto", key="btn_drill_total_gen", use_container_width=True):
+                st.session_state["wip_drilldown_area"] = "TOTAL_GENERAL"
+                st.rerun()
+
+        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
         cols = st.columns(4)
-        
-        process_icons = {
-            "Corte": "✂️",
-            "Rebabeo": "⚙️",
-            "Doblez": "📐",
-            "Barrenado": "🔩",
-            "Pintura": "🎨",
-            "Liberado": "✅",
-            "Empaque": "📦"
-        }
-        
-        friendly_names = {
-            "Corte": "Piezas por cortar",
-            "Rebabeo": "Piezas por rebabear",
-            "Doblez": "Piezas por doblar",
-            "Barrenado": "Piezas por barrenar",
-            "Pintura": "Piezas por pintar",
-            "Liberado": "Piezas por liberar",
-            "Empaque": "Piezas por empacar"
-        }
         
         for i, proc in enumerate(relevant_procs):
             with cols[i % 4]:
@@ -513,20 +1102,69 @@ def view_reportes():
                 icon = process_icons.get(proc, "🏭")
                 pct = (wip_val / total_general * 100) if total_general > 0 else 0
                 label = friendly_names.get(proc, proc)
+                btn_label_short = f"🔍 {label} ({wip_val:,})"
                 st.markdown(
                     f'''
-                    <div style="background-color: #f8f9fa; border-top: 5px solid {color}; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); position: relative;">
+                    <div class="odoo-wip-card" data-drill-label="{btn_label_short}"
+                         style="background-color: #f8f9fa; border-top: 5px solid {color}; padding: 18px 15px 12px 15px; border-radius: 8px 8px 0 0; margin-bottom: 0px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.08); position: relative; cursor: pointer; transition: all 0.15s ease;"
+                         title="Clic para abrir Detalle en Tabla y Pareto de {label}">
                         <div style="position: absolute; top: 10px; right: 10px; background-color: #e9ecef; color: #495057; padding: 2px 8px; border-radius: 12px; font-size: 0.85rem; font-weight: bold; box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);">{pct:.1f}%</div>
-                        <div style="font-size: 2.2rem; margin-bottom: 5px;">{icon}</div>
+                        <div style="font-size: 2.2rem; margin-bottom: 4px;">{icon}</div>
                         <p style="margin: 0; font-size: 0.95rem; color: #555; font-weight: bold; text-transform: uppercase;">{label}</p>
-                        <h2 style="margin: 5px 0 0 0; font-size: 3rem; font-weight: 900; color: {color};">{wip_val}</h2>
+                        <h2 style="margin: 4px 0 2px 0; font-size: 3rem; font-weight: 900; color: {color};">{wip_val}</h2>
+                        <div style="font-size: 0.72rem; color: #6c757d; font-weight: 600; margin-top: 2px;">📊 Clic para ver Tabla y Pareto ➔</div>
                     </div>
                     ''', unsafe_allow_html=True
                 )
-                
+                if st.button(btn_label_short, key=f"btn_wip_card_{proc}", use_container_width=True):
+                    st.session_state["wip_drilldown_area"] = proc
+                    st.rerun()
+                st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+
+        # Script JS ligero para que dar clic en cualquier parte de la tarjeta HTML dispare el botón inmediatamente
+        import streamlit.components.v1 as components
+        components.html(
+            """
+            <script>
+            (function() {
+                const doc = window.parent.document;
+                function bindOdooCards() {
+                    const cards = doc.querySelectorAll('[data-drill-label]');
+                    cards.forEach(card => {
+                        if (card.dataset.boundClick) return;
+                        card.dataset.boundClick = "1";
+                        card.addEventListener('mouseenter', () => {
+                            card.style.transform = 'translateY(-3px)';
+                            card.style.boxShadow = '0 8px 16px rgba(236,32,36,0.18)';
+                        });
+                        card.addEventListener('mouseleave', () => {
+                            card.style.transform = 'none';
+                            card.style.boxShadow = '0 4px 6px rgba(0,0,0,0.08)';
+                        });
+                        card.addEventListener('click', () => {
+                            const targetText = card.getAttribute('data-drill-label');
+                            const buttons = doc.querySelectorAll('button');
+                            for (const btn of buttons) {
+                                if (btn.innerText && btn.innerText.includes(targetText)) {
+                                    btn.click();
+                                    break;
+                                }
+                            }
+                        });
+                    });
+                }
+                bindOdooCards();
+                setTimeout(bindOdooCards, 400);
+                setTimeout(bindOdooCards, 1200);
+            })();
+            </script>
+            """,
+            height=0
+        )
+
         # Tabs para Gráfica de Pareto y Tendencia
         tab_pareto_act, tab_tendencia_wip = st.tabs([
-            "📊 Cuello de Botella Actual (Pareto)",
+            "📊 Cuello de Botella Actual (Pareto — Clic en Barra para Detalle)",
             "📈 Histórico y Tendencia del WIP (Lunes a Sábado)"
         ])
         
@@ -535,10 +1173,30 @@ def view_reportes():
                 "Proceso": [friendly_names.get(p, p) for p in relevant_procs],
                 "WIP Disponible": [wip_data.get(p, 0) for p in relevant_procs]
             })
-            fig = px.bar(df_chart, x="Proceso", y="WIP Disponible", title="Distribución del Cuello de Botella (WIP en Piso)", 
-                         color="WIP Disponible", color_continuous_scale="Reds", text_auto=True)
+            fig = px.bar(
+                df_chart,
+                x="Proceso",
+                y="WIP Disponible",
+                title="Distribución del Cuello de Botella (WIP en Piso) — 💡 Haz clic en cualquier barra para abrir su Detalle y Pareto",
+                color="WIP Disponible",
+                color_continuous_scale="Reds",
+                text_auto=True
+            )
             fig.update_layout(xaxis_title="Área / Proceso", yaxis_title="Cantidad de Piezas en WIP")
-            st.plotly_chart(fig, use_container_width=True)
+            chart_event = st.plotly_chart(
+                fig,
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="points",
+                key="wip_bottleneck_clickable_chart"
+            )
+            if chart_event and hasattr(chart_event, "selection") and chart_event.selection:
+                pts = chart_event.selection.get("points", [])
+                if pts:
+                    clicked_proc_friendly = pts[0].get("x")
+                    if clicked_proc_friendly in inv_friendly_names:
+                        st.session_state["wip_drilldown_area"] = inv_friendly_names[clicked_proc_friendly]
+                        st.rerun()
             
         with tab_tendencia_wip:
             # Obtener todas las fechas con avances
@@ -609,34 +1267,23 @@ def view_reportes():
             else:
                 st.info("No hay datos históricos suficientes para calcular la tendencia del WIP.")
         
-        # --- DETALLE DE WIP POR PROCESO ---
-        st.markdown("### 🔍 Detalle y Descarga de Piezas en WIP")
-        st.markdown("Selecciona un proceso para ver la lista exacta de piezas y cantidades que se encuentran esperando en esa estación:")
-        
-        inv_friendly_names = {v: k for k, v in friendly_names.items()}
-        proc_wip_options = ["Selecciona un área..."] + [friendly_names[p] for p in relevant_procs]
-        proc_wip_selected_friendly = st.selectbox(
-            "Selecciona un Proceso/Área:", 
-            proc_wip_options,
-            key="wip_detail_selector"
-        )
-        
-        if proc_wip_selected_friendly != "Selecciona un área...":
-            proc_wip_selected = inv_friendly_names[proc_wip_selected_friendly]
-            df_wip_det = get_wip_pieces_detail(of_list, proc_wip_selected)
-            if df_wip_det.empty:
-                st.info(f"✅ No hay piezas pendientes (WIP) esperando en el área de **{proc_wip_selected_friendly}**.")
-            else:
-                st.dataframe(df_wip_det, use_container_width=True, height=250, hide_index=True)
-                csv_data = df_wip_det.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label=f"📥 Descargar Reporte de Piezas en WIP - {proc_wip_selected_friendly} (CSV)",
-                    data=csv_data,
-                    file_name=f"WIP_{proc_wip_selected}_{display_name.replace(' ', '_')}.csv",
-                    mime="text/csv",
-                    type="primary",
-                    use_container_width=True
-                )
+        # --- DETALLE RÁPIDO POR SELECTOR (TAMBIÉN ABRE VISTA COMPLETA) ---
+        st.markdown("### 🔍 Acceso Rápido a Detalle y Pareto por Proceso")
+        col_sel_q, col_btn_q = st.columns([2.5, 1.5])
+        with col_sel_q:
+            proc_wip_options = ["Selecciona un área..."] + [friendly_names[p] for p in relevant_procs]
+            proc_wip_selected_friendly = st.selectbox(
+                "Selecciona un Proceso/Área:", 
+                proc_wip_options,
+                key="wip_detail_selector"
+            )
+        with col_btn_q:
+            st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+            if proc_wip_selected_friendly != "Selecciona un área...":
+                proc_wip_selected = inv_friendly_names[proc_wip_selected_friendly]
+                if st.button(f"🚀 Abrir Pantalla Pareto y Detalle de {proc_wip_selected_friendly}", type="primary", use_container_width=True):
+                    st.session_state["wip_drilldown_area"] = proc_wip_selected
+                    st.rerun()
         
         st.markdown("---")
         st.markdown("### 📥 Exportar Datos")

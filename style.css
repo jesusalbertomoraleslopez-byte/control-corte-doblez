@@ -108,8 +108,17 @@ header {
 }
 
 /* =============================================
-   SIDEBAR NAVIGATION MENU — Premium Style
+   SIDEBAR NAVIGATION MENU — High Visibility & Compact Logo
    ============================================= */
+
+/* Reduce top/side padding in sidebar so logo doesn't waste space */
+section[data-testid="stSidebar"] > div:first-child,
+[data-testid="stSidebarContent"],
+[data-testid="stSidebarUserContent"] {
+    padding-top: 0.5rem !important;
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+}
 
 /* Kill white backgrounds on ALL button wrappers inside sidebar */
 section[data-testid="stSidebar"] div[data-testid="stButton"],
@@ -125,52 +134,86 @@ section[data-testid="stSidebar"] div[data-testid="stButtonContainer"] > div {
 
 /* Reduce default spacing and vertical gap between all sidebar elements */
 [data-testid="stSidebarUserContent"] div[data-testid="stVerticalBlock"] {
-    gap: 0.35rem !important;
+    gap: 0.32rem !important;
 }
 
-/* Base button styling for ALL buttons inside the sidebar (Default to Inactive state) */
+/* Base button styling for ALL buttons inside the sidebar (Inactive state with high contrast card) */
 section[data-testid="stSidebar"] button {
-    background-color: transparent !important;
-    background: transparent !important;
-    border: none !important;
-    border-left: 4px solid transparent !important;
-    border-radius: 0 8px 8px 0 !important;
-    color: #e0e0e0 !important; /* Brighter grey for high readability */
+    background-color: #1c1e24 !important;
+    background: linear-gradient(90deg, #1e2028 0%, #17181e 100%) !important;
+    border: 1px solid #323542 !important;
+    border-left: 4px solid #EC2024 !important;
+    border-radius: 8px !important;
+    color: #FFFFFF !important;
     text-align: left !important;
     justify-content: flex-start !important;
+    align-items: center !important;
+    display: flex !important;
     width: 100% !important;
-    padding: 10px 14px !important;
-    font-family: 'Questrial', sans-serif !important;
-    font-size: 1.12rem !important; /* Larger text as requested */
-    font-weight: 600 !important;   /* Bold/heavy text for visibility */
-    letter-spacing: 0.3px !important;
-    line-height: 1.3 !important;
+    padding: 9px 12px !important;
+    min-height: 46px !important;
     transition: all 0.15s ease-in-out !important;
-    box-shadow: none !important;
-    margin: 0 !important;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35) !important;
+    margin: 1px 0 !important;
     height: auto !important;
+}
+
+/* Force inner markdown & paragraph text inside sidebar buttons to be crisp, bold, bright white and left-aligned */
+section[data-testid="stSidebar"] button div[data-testid="stMarkdownContainer"],
+section[data-testid="stSidebar"] button p,
+section[data-testid="stSidebar"] button span {
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 1.0rem !important;
+    font-weight: 700 !important;
+    color: #FFFFFF !important;
+    text-align: left !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    line-height: 1.25 !important;
+    letter-spacing: 0.2px !important;
+}
+
+/* Make the button Icon MUCH larger and aligned */
+section[data-testid="stSidebar"] button span[data-testid="stIconEmoji"],
+section[data-testid="stSidebar"] button [data-testid*="Icon"] {
+    font-size: 1.65rem !important;
+    line-height: 1 !important;
+    margin-right: 10px !important;
+    min-width: 30px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
 }
 
 /* Hover state for Inactive buttons */
 section[data-testid="stSidebar"] button:hover {
-    background-color: rgba(236, 32, 36, 0.12) !important;
-    border-left: 4px solid rgba(236, 32, 36, 0.6) !important;
-    color: #ffffff !important;
-    box-shadow: none !important;
+    background: linear-gradient(90deg, rgba(236, 32, 36, 0.28) 0%, #232631 100%) !important;
+    border-color: #EC2024 !important;
+    border-left: 5px solid #FFFFFF !important;
+    color: #FFFFFF !important;
+    transform: translateX(2px);
+    box-shadow: 0 4px 10px rgba(236, 32, 36, 0.25) !important;
 }
 
-/* Primary (Active) Button styles - overrides the transparent base styles */
+/* Primary (Active) Button styles - unmistakable SIGRAMA Red */
 section[data-testid="stSidebar"] button[kind="primary"],
 section[data-testid="stSidebar"] button[data-testid="baseButton-primary"] {
     background-color: #EC2024 !important;
-    background: #EC2024 !important;
-    border: 1px solid #EC2024 !important;
-    border-left: 5px solid #FFFFFF !important;
-    border-radius: 0 8px 8px 0 !important;
-    color: #ffffff !important;
-    font-size: 1.15rem !important;
-    font-weight: 700 !important;
-    box-shadow: 0 4px 10px rgba(236, 32, 36, 0.3) !important;
+    background: linear-gradient(90deg, #EC2024 0%, #c8161a 100%) !important;
+    border: 1px solid #ff4d50 !important;
+    border-left: 6px solid #FFFFFF !important;
+    border-radius: 8px !important;
+    color: #FFFFFF !important;
+    box-shadow: 0 4px 14px rgba(236, 32, 36, 0.5) !important;
+}
+
+section[data-testid="stSidebar"] button[kind="primary"] p,
+section[data-testid="stSidebar"] button[data-testid="baseButton-primary"] p {
+    font-size: 1.04rem !important;
+    font-weight: 800 !important;
+    color: #FFFFFF !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 /* Hover state for Active button */
@@ -178,7 +221,7 @@ section[data-testid="stSidebar"] button[kind="primary"]:hover,
 section[data-testid="stSidebar"] button[data-testid="baseButton-primary"]:hover {
     background-color: #d11a1e !important;
     background: #d11a1e !important;
-    border-color: #d11a1e !important;
+    border-color: #ffffff !important;
     color: #ffffff !important;
 }
 
@@ -193,8 +236,10 @@ section[data-testid="stSidebar"] button:active {
 /* Nav dividers spacing */
 [data-testid="stSidebar"] hr {
     border: none !important;
-    border-top: 1px solid #2a2a2a !important;
-    margin: 6px 0 !important;
+    border-top: 1px solid #2e3038 !important;
+    margin: 5px 0 !important;
     background: none !important;
+}
+
 
 

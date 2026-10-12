@@ -164,54 +164,55 @@ def get_sidebar_stats():
 
 # --- Menú Lateral ---
 def render_sidebar():
+    import base64
     logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+    logo_img_tag = ""
     if os.path.exists(logo_path):
-        st.sidebar.image(logo_path, use_container_width=True)
-    else:
-        # Logo SVG de respaldo
-        logo_html = """
-        <div style="display: flex; align-items: center; margin-bottom: 25px;">
-            <svg width="45" height="45" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right: 12px; margin-top: 5px;">
+        try:
+            with open(logo_path, "rb") as _lf:
+                _b64 = base64.b64encode(_lf.read()).decode("utf-8")
+            logo_img_tag = f'<img src="data:image/png;base64,{_b64}" style="max-height:36px; width:auto; display:block;" alt="SIGRAMA" />'
+        except Exception:
+            logo_img_tag = ""
+
+    if not logo_img_tag:
+        logo_img_tag = """
+        <div style="display:flex;align-items:center;gap:8px;">
+            <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
               <polygon points="0,0 100,0 100,15 0,30" fill="#EC2024" />
               <polygon points="0,40 100,25 100,75 0,60" fill="#EC2024" />
               <polygon points="0,70 100,85 100,100 0,100" fill="#EC2024" />
             </svg>
-            <div style="display: flex; flex-direction: column; justify-content: center; margin-top: -2px;">
-                <span style="font-family: 'Questrial', sans-serif; font-size: 14px; letter-spacing: 4px; color: white; line-height: 1; margin-bottom: -4px;">
-                    industria
-                </span>
-                <span style="font-family: 'Montserrat', sans-serif; font-size: 26px; font-weight: 900; font-style: italic; color: white; line-height: 1;">
-                    SIGRAMA
-                </span>
-            </div>
+            <span style="font-family:'Montserrat',sans-serif;font-size:19px;font-weight:900;font-style:italic;color:white;">SIGRAMA</span>
         </div>
         """
-        st.sidebar.markdown(logo_html, unsafe_allow_html=True)
-        
+
     user_display = st.session_state.get("nombre_completo") or st.session_state.get("username") or "Usuario"
-    role_icon = "🛡️" if st.session_state.role == "Administrador" else ("👑" if st.session_state.role == "Supervisor" else "👷")
-    user_badge = f"""
-    <div style="background:#1e1e1e;border-radius:8px;padding:8px 12px;margin-bottom:12px;
-                border-left:3px solid #EC2024;font-family:'Questrial',sans-serif;">
-        <span style="font-size:0.65rem;color:#888;letter-spacing:2px;text-transform:uppercase;">
-            Usuario activo
-        </span><br>
-        <span style="font-size:0.95rem;color:#fff;font-weight:600;">
+    role_str = str(st.session_state.role or "admin")
+    role_icon = "🛡️" if role_str.lower() in ["administrador", "admin"] else ("👑" if role_str == "Supervisor" else "👷")
+
+    header_badge = f"""
+    <div style="background:#18191f;border-radius:9px;padding:8px 11px;margin-bottom:8px;
+                border:1px solid #2b2d38;border-left:4px solid #EC2024;font-family:'Questrial',sans-serif;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;padding-bottom:5px;border-bottom:1px solid #2a2c35;">
+            {logo_img_tag}
+            <span style="background:#EC2024;color:#fff;font-size:0.65rem;font-weight:800;padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:0.5px;">
+                {role_str}
+            </span>
+        </div>
+        <div style="font-size:0.84rem;color:#ffffff;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
             {role_icon} {user_display}
-        </span><br>
-        <span style="font-size:0.75rem;color:#aaa;">
-            Rol: {st.session_state.role}
-        </span>
+        </div>
     </div>
     """
-    st.sidebar.markdown(user_badge, unsafe_allow_html=True)
+    st.sidebar.markdown(header_badge, unsafe_allow_html=True)
     
-    # Definición del menú con nuevo orden operativo SIGRAMA
+    # Definición del menú con iconos grandes y texto claro
     MENU_ITEMS = [
         {"key": "dashboard",       "icon": "📊", "label": "Panel de Control",            "admin_only": False},
         {"key": "supervision_gcs", "icon": "🛰️", "label": "Supervisión Repositorio OF", "admin_only": False},
         {"key": "kanban",          "icon": "🗂️", "label": "Tablero Kanban",             "admin_only": False},
-        {"key": "produccion",      "icon": "⚙️",  "label": "Control de Producción",     "admin_only": False},
+        {"key": "produccion",      "icon": "⚙️", "label": "Control de Producción",      "admin_only": False},
         {"key": "consultas",       "icon": "📋", "label": "Consultas y Reportes",       "admin_only": False},
         {"key": "etiquetas",       "icon": "🏷️", "label": "Supervisión Etiquetas OF",   "admin_only": False},
         {"key": "global",          "icon": "🌐", "label": "Monitoreo Global",            "admin_only": False},
@@ -221,7 +222,7 @@ def render_sidebar():
         {"key": "sgc",             "icon": "📂", "label": "Documentos SGC",              "admin_only": True},
     ]
 
-    is_admin = st.session_state.role == "Administrador"
+    is_admin = str(st.session_state.role).lower() in ["administrador", "admin"]
 
     # Inicializar selección activa
     if "nav_choice" not in st.session_state:
@@ -229,25 +230,23 @@ def render_sidebar():
 
     current = st.session_state.nav_choice
 
-    sep_count = 0
     for item in MENU_ITEMS:
         if item is None:
-            sep_count += 1
-            st.sidebar.markdown('<hr style="border:none;border-top:1px solid #333;margin:6px 0;">', unsafe_allow_html=True)
+            st.sidebar.markdown('<hr style="border:none;border-top:1px solid #2e3038;margin:4px 0;">', unsafe_allow_html=True)
             continue
         if item["admin_only"] and not is_admin:
             continue
         is_active = current == item["key"]
         
-        # Render como botón Streamlit para capturar clics (con clase primaria si está activo)
         btn_key = f"nav_btn_{item['key']}"
         btn_type = "primary" if is_active else "secondary"
         if st.sidebar.button(
-            f"{item['icon']}  {item['label']}",
+            item["label"],
+            icon=item["icon"],
             key=btn_key,
             use_container_width=True,
             type=btn_type,
-            help=item['label']
+            help=item["label"]
         ):
             st.session_state.nav_choice = item["key"]
             st.rerun()
@@ -265,7 +264,6 @@ def render_sidebar():
         st.session_state.of_number = current_active
     else:
         st.session_state.of_number = None
-    st.sidebar.markdown("---")
 
     av_dict, wip_data = get_sidebar_stats()
     
@@ -287,39 +285,37 @@ def render_sidebar():
     wip_empaque = wip_data.get("Empaque", 0)
     
     stats_html = f"""
-    <div style="background-color: #1a1a1a; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #32CD32; font-family: 'Questrial', sans-serif;">
-        <p style="margin: 0; font-size: 0.82rem; color: #aaa; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">📈 AVANCES REGISTRADOS</p>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.75rem; color: #fff; margin-top: 8px;">
-            <div><b>Ingeniería:</b> {av_ingenieria:,}</div>
+    <div style="background-color: #18191f; padding: 9px 10px; border-radius: 8px; margin-top: 6px; margin-bottom: 6px; border: 1px solid #2b2d38; border-left: 4px solid #32CD32; font-family: 'Questrial', sans-serif;">
+        <p style="margin: 0; font-size: 0.76rem; color: #32CD32; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">📈 AVANCES REGISTRADOS</p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; font-size: 0.76rem; color: #fff; margin-top: 5px;">
+            <div><b>Ing:</b> {av_ingenieria:,}</div>
             <div><b>Corte:</b> {av_corte:,}</div>
             <div><b>Rebabeo:</b> {av_rebabeo:,}</div>
             <div><b>Doblez:</b> {av_doblez:,}</div>
             <div><b>Barrenado:</b> {av_barrenado:,}</div>
             <div><b>Pintura:</b> {av_pintura:,}</div>
             <div><b>Liberado:</b> {av_liberado:,}</div>
-            <div style="grid-column: span 2;"><b>Empaque:</b> {av_empaque:,}</div>
+            <div><b>Empaque:</b> {av_empaque:,}</div>
         </div>
     </div>
  
-    <div style="background-color: #1a1a1a; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #EC2024; font-family: 'Questrial', sans-serif;">
-        <p style="margin: 0; font-size: 0.82rem; color: #aaa; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">🏭 WIP EN PISO (TOTAL)</p>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.75rem; color: #fff; margin-top: 8px;">
+    <div style="background-color: #18191f; padding: 9px 10px; border-radius: 8px; margin-bottom: 6px; border: 1px solid #2b2d38; border-left: 4px solid #EC2024; font-family: 'Questrial', sans-serif;">
+        <p style="margin: 0; font-size: 0.76rem; color: #ff6b6e; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">🏭 WIP EN PISO (TOTAL)</p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; font-size: 0.76rem; color: #fff; margin-top: 5px;">
             <div><b>Por Cortar:</b> {wip_corte:,}</div>
-            <div><b>Por Rebabear:</b> {wip_rebabeo:,}</div>
+            <div><b>Rebabear:</b> {wip_rebabeo:,}</div>
             <div><b>Por Doblar:</b> {wip_doblez:,}</div>
-            <div><b>Por Barrenar:</b> {wip_barrenado:,}</div>
+            <div><b>Barrenar:</b> {wip_barrenado:,}</div>
             <div><b>Por Pintar:</b> {wip_pintura:,}</div>
-            <div><b>Por Liberar:</b> {wip_liberado:,}</div>
+            <div><b>Liberar:</b> {wip_liberado:,}</div>
             <div style="grid-column: span 2;"><b>Por Empacar:</b> {wip_empaque:,}</div>
         </div>
     </div>
     """
     st.sidebar.markdown(stats_html, unsafe_allow_html=True)
-    
-    st.sidebar.markdown("---")
 
     # Botón exclusivo para traer los datos más recientes desde Google Cloud Platform
-    if st.sidebar.button("☁️ Jalar Información de GCP", use_container_width=True, key="sidebar_pull_gcp_btn"):
+    if st.sidebar.button("Jalar Información de GCP", icon="☁️", use_container_width=True, key="sidebar_pull_gcp_btn"):
         with st.spinner("Descargando base de datos oficial y órdenes desde GCP..."):
             try:
                 from utils.gcs_sync import pull_data_from_gcp
@@ -336,13 +332,12 @@ def render_sidebar():
 
     col_out1, col_out2 = st.sidebar.columns(2)
     with col_out1:
-        if st.button("🔄 Sincronizar", use_container_width=True, key="sidebar_sync_btn"):
+        if st.button("Sincronizar", icon="🔄", use_container_width=True, key="sidebar_sync_btn"):
             with st.spinner("Sincronizando..."):
                 try:
                     from utils.database import sync_and_push_db
                     res_commit, res_push = sync_and_push_db()
                     
-                    # También respaldar a GCS
                     from utils.gcs_sync import push_db_to_gcs_async
                     push_db_to_gcs_async()
 
@@ -360,22 +355,17 @@ def render_sidebar():
                     st.toast(f"❌ Error: {e}", icon="🚨")
                     
     with col_out2:
-        if st.button("🚪 Salir", use_container_width=True, key="sidebar_logout_btn"):
+        if st.button("Salir", icon="🚪", use_container_width=True, key="sidebar_logout_btn"):
             logout()
         
-    # Slogan inferior
-    slogan_path = os.path.join(os.path.dirname(__file__), "assets", "slogan.png")
-    if os.path.exists(slogan_path):
-        st.sidebar.image(slogan_path, use_container_width=True)
-    else:
-        slogan_html = """
-        <div style="margin-top: 50px; text-align: left;">
-            <span style="font-family: 'Questrial', sans-serif; font-size: 14px; color: white;">Ingeniería que da</span><br>
-            <span style="font-family: 'Montserrat', sans-serif; font-size: 24px; font-weight: 700; font-style: italic; color: white;">resultados!!</span>
-            <div style="width: 100%; height: 2px; background-color: #EC2024; margin-top: 5px;"></div>
-        </div>
-        """
-        st.sidebar.markdown(slogan_html, unsafe_allow_html=True)
+    # Slogan inferior compacto
+    slogan_html = """
+    <div style="margin-top: 8px; padding-top: 6px; border-top: 2px solid #EC2024; text-align: center; line-height: 1.15;">
+        <span style="font-family: 'Questrial', sans-serif; font-size: 11px; color: #bbb; letter-spacing: 1px;">Ingeniería que da </span>
+        <span style="font-family: 'Montserrat', sans-serif; font-size: 14px; font-weight: 800; font-style: italic; color: #FFFFFF;">resultados!!</span>
+    </div>
+    """
+    st.sidebar.markdown(slogan_html, unsafe_allow_html=True)
         
     return choice
 
