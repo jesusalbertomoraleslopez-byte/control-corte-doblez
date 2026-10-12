@@ -160,77 +160,97 @@ def git_sync_db():
             pass
     threading.Thread(target=_sync, daemon=True).start()
 
-def save_db_to_excel(conn=None):
-    """Exporta todas las tablas SQLite al archivo Excel sigrama_database.xlsx con verificación de integridad."""
-    close_at_end = False
-    if conn is None:
-        conn = sqlite3.connect(TEMP_DB_PATH)
-        close_at_end = True
-        
-    tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas", "usuarios", "bitacora_auditoria", "inventario_laminas"]
-    temp_excel = "sigrama_database_temp.xlsx"
-    try:
-        with pd.ExcelWriter(temp_excel, engine='openpyxl') as writer:
-            for t in tables:
+_excel_save_lock = threading.Lock()
+
+def _write_sqlite_to_excel_sync():
+    """Volcado síncrono interno protegido por Lock de SQLite a sigrama_database.xlsx y GCS."""
+    global _last_excel_mtime
+    with _excel_save_lock:
+        conn = sqlite3.connect(TEMP_DB_PATH, timeout=20)
+        tables = ["ordenes", "nidos", "piezas", "avances", "rechazos", "personal_areas", "config_correos", "tarimas", "usuarios", "bitacora_auditoria", "inventario_laminas"]
+        temp_excel = "sigrama_database_temp.xlsx"
+        try:
+            with pd.ExcelWriter(temp_excel, engine='openpyxl') as writer:
+                for t in tables:
+                    try:
+                        df = pd.read_sql_query(f"SELECT * FROM {t}", conn)
+                    except Exception:
+                        df = pd.DataFrame()
+                    df.to_excel(writer, sheet_name=t, index=False)
+
+            if os.path.exists(temp_excel) and os.path.getsize(temp_excel) > 5000:
+                shutil.copyfile(temp_excel, EXCEL_DB_PATH)
+            if os.path.exists(temp_excel):
                 try:
-                    df = pd.read_sql_query(f"SELECT * FROM {t}", conn)
+                    os.remove(temp_excel)
                 except Exception:
-                    df = pd.DataFrame()
-                df.to_excel(writer, sheet_name=t, index=False)
-        
-        # Validar integridad del archivo generado antes de sobrescribir el principal
-        if os.path.exists(temp_excel) and os.path.getsize(temp_excel) > 10000:
-            try:
-                _test_chk = pd.ExcelFile(temp_excel)
-                if 'ordenes' in _test_chk.sheet_names:
-                    shutil.copyfile(temp_excel, EXCEL_DB_PATH)
-            except Exception as _e_corrupt:
-                print(f"Advertencia: Archivo temporal generado está corrupto ({_e_corrupt}), no se reemplaza el archivo principal.")
-        if os.path.exists(temp_excel):
-            try:
-                os.remove(temp_excel)
-            except:
-                pass
-        
-        # Actualizar mtime para evitar re-sincronizaciones locales innecesarias
-        if os.path.exists(EXCEL_DB_PATH):
-            global _last_excel_mtime
-            _last_excel_mtime = os.path.getmtime(EXCEL_DB_PATH)
-            try:
-                from utils.gcs_sync import push_db_to_gcs_async
-                push_db_to_gcs_async()
-            except Exception:
-                pass
-    except Exception as e:
-        print(f"Error al guardar base de datos a Excel: {e}")
-        if os.path.exists(temp_excel):
-            try:
-                os.remove(temp_excel)
-            except:
-                pass
-    finally:
-        if close_at_end:
+                    pass
+
+            if os.path.exists(EXCEL_DB_PATH):
+                _last_excel_mtime = os.path.getmtime(EXCEL_DB_PATH)
+                try:
+                    from utils.gcs_sync import push_db_to_gcs
+                    push_db_to_gcs()
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"Error al guardar base de datos a Excel: {e}")
+            if os.path.exists(temp_excel):
+                try:
+                    os.remove(temp_excel)
+                except Exception:
+                    pass
+        finally:
             conn.close()
 
-def sync_excel_to_sqlite():
-    """Carga los datos del archivo Excel sigrama_database.xlsx a la base SQLite temporal."""
+def save_db_to_excel(conn=None, background=True):
+    """
+    Exporta todas las tablas SQLite al archivo Excel sigrama_database.xlsx y lo respalda en GCS.
+    Por defecto se ejecuta en un hilo en segundo plano para no bloquear la interfaz del usuario.
+    """
+    if conn is not None:
+        try:
+            conn.commit()
+        except Exception:
+            pass
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
+    if background:
+        threading.Thread(target=_write_sqlite_to_excel_sync, daemon=True).start()
+    else:
+        _write_sqlite_to_excel_sync()
+
+def sync_excel_to_sqlite(force=False):
+    """Carga los datos del archivo Excel sigrama_database.xlsx a la base SQLite temporal solo cuando es necesario."""
+    global _last_excel_mtime
+
+    if not force and _last_excel_mtime > 0 and os.path.exists(TEMP_DB_PATH) and os.path.exists(EXCEL_DB_PATH):
+        try:
+            curr_mtime = os.path.getmtime(EXCEL_DB_PATH)
+            if curr_mtime <= _last_excel_mtime:
+                return
+        except Exception:
+            pass
+
     init_db_schema()
     
     if not os.path.exists(EXCEL_DB_PATH) or os.path.getsize(EXCEL_DB_PATH) < 10000:
-        # Si el Excel no existe o es muy pequeño/corrupto, pero SQLite tiene datos, guardamos SQLite a Excel
         if os.path.exists(TEMP_DB_PATH):
             try:
                 c_test = sqlite3.connect(TEMP_DB_PATH)
                 n_ord = c_test.execute("SELECT count(*) FROM ordenes").fetchone()[0]
                 c_test.close()
                 if n_ord > 0:
-                    save_db_to_excel()
+                    save_db_to_excel(background=True)
                     return
             except Exception:
                 pass
         return
         
-    conn = sqlite3.connect(TEMP_DB_PATH)
+    conn = sqlite3.connect(TEMP_DB_PATH, timeout=20)
     c = conn.cursor()
     
     try:
@@ -244,39 +264,38 @@ def sync_excel_to_sqlite():
                 df = pd.read_excel(excel_file, sheet_name=best_match)
                 if not df.empty:
                     c.execute(f"DELETE FROM {t}")
-                    # Reemplazar valores nulos por None para evitar errores en SQLite
                     df = df.astype(object).where(pd.notnull(df), None)
                     df.to_sql(t, conn, if_exists='append', index=False)
         conn.commit()
+        _last_excel_mtime = os.path.getmtime(EXCEL_DB_PATH)
     except Exception as e:
         print(f"Error al sincronizar Excel a SQLite: {e}")
-        # Si el Excel falló por corrupción pero SQLite tiene datos, restaurar Excel desde SQLite
         if os.path.exists(TEMP_DB_PATH):
             try:
                 c_rec = sqlite3.connect(TEMP_DB_PATH)
                 n_o = c_rec.execute("SELECT count(*) FROM ordenes").fetchone()[0]
                 c_rec.close()
                 if n_o > 0:
-                    save_db_to_excel()
+                    save_db_to_excel(background=True)
             except Exception:
                 pass
     finally:
         conn.close()
 
 def get_connection():
-    """Obtiene la conexión a la base de datos temporal SQLite, sincronizándola si el Excel cambió."""
+    """Obtiene la conexión a la base de datos temporal SQLite en O(1), sincronizando solo si el Excel cambió."""
     global _last_excel_mtime
     
     if os.path.exists(EXCEL_DB_PATH):
         mtime = os.path.getmtime(EXCEL_DB_PATH)
         if mtime > _last_excel_mtime or not os.path.exists(TEMP_DB_PATH):
-            sync_excel_to_sqlite()
+            sync_excel_to_sqlite(force=True)
             _last_excel_mtime = mtime
     else:
         if not os.path.exists(TEMP_DB_PATH):
-            sync_excel_to_sqlite()
+            sync_excel_to_sqlite(force=True)
             
-    conn = sqlite3.connect(TEMP_DB_PATH)
+    conn = sqlite3.connect(TEMP_DB_PATH, timeout=20)
     return conn
 
 def init_db_schema(conn=None):
@@ -447,6 +466,19 @@ def init_db_schema(conn=None):
         )
     ''')
     
+    # Índices compuestos para acelerar consultas de WIP, Pareto y Avances en O(log N)
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA synchronous=NORMAL;")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_avances_of_area_pieza ON avances(of_number, area, no_pieza);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_avances_of_nido_area ON avances(of_number, nido, area);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_avances_ts ON avances(timestamp);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_rechazos_of_area_pieza ON rechazos(of_number, area, no_pieza);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_piezas_of_nido_pieza ON piezas(of_number, nido, no_pieza);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_nidos_of_nido ON nidos(of_number, nido);")
+    except Exception:
+        pass
+
     try:
         check_and_seed_personal_areas(cursor)
     except Exception:
@@ -462,7 +494,7 @@ def init_db_schema(conn=None):
         conn.close()
 
 def init_db():
-    sync_excel_to_sqlite()
+    sync_excel_to_sqlite(force=False)
 
 def clear_db():
     """Limpia todas las tablas."""

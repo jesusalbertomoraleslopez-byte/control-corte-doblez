@@ -43,12 +43,35 @@ if "_gcs_initial_sync" not in st.session_state:
 init_db()
 
 # --- Inyección de CSS ---
+@st.cache_data(ttl=3600, show_spinner=False)
 def _read_css():
     css_file = "style.css"
     if os.path.exists(css_file):
-        with open(css_file) as f:
+        with open(css_file, encoding="utf-8", errors="ignore") as f:
             return f.read()
     return ""
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _get_logo_b64_tag():
+    import base64
+    logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+    if os.path.exists(logo_path):
+        try:
+            with open(logo_path, "rb") as _lf:
+                _b64 = base64.b64encode(_lf.read()).decode("utf-8")
+            return f'<img src="data:image/png;base64,{_b64}" style="max-height:36px; width:auto; display:block;" alt="SIGRAMA" />'
+        except Exception:
+            pass
+    return """
+    <div style="display:flex;align-items:center;gap:8px;">
+        <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
+          <polygon points="0,0 100,0 100,15 0,30" fill="#EC2024" />
+          <polygon points="0,40 100,25 100,75 0,60" fill="#EC2024" />
+          <polygon points="0,70 100,85 100,100 0,100" fill="#EC2024" />
+        </svg>
+        <span style="font-family:'Montserrat',sans-serif;font-size:19px;font-weight:900;font-style:italic;color:white;">SIGRAMA</span>
+    </div>
+    """
 
 def inject_css():
     css = _read_css()
@@ -164,28 +187,7 @@ def get_sidebar_stats():
 
 # --- Menú Lateral ---
 def render_sidebar():
-    import base64
-    logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
-    logo_img_tag = ""
-    if os.path.exists(logo_path):
-        try:
-            with open(logo_path, "rb") as _lf:
-                _b64 = base64.b64encode(_lf.read()).decode("utf-8")
-            logo_img_tag = f'<img src="data:image/png;base64,{_b64}" style="max-height:36px; width:auto; display:block;" alt="SIGRAMA" />'
-        except Exception:
-            logo_img_tag = ""
-
-    if not logo_img_tag:
-        logo_img_tag = """
-        <div style="display:flex;align-items:center;gap:8px;">
-            <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
-              <polygon points="0,0 100,0 100,15 0,30" fill="#EC2024" />
-              <polygon points="0,40 100,25 100,75 0,60" fill="#EC2024" />
-              <polygon points="0,70 100,85 100,100 0,100" fill="#EC2024" />
-            </svg>
-            <span style="font-family:'Montserrat',sans-serif;font-size:19px;font-weight:900;font-style:italic;color:white;">SIGRAMA</span>
-        </div>
-        """
+    logo_img_tag = _get_logo_b64_tag()
 
     user_display = st.session_state.get("nombre_completo") or st.session_state.get("username") or "Usuario"
     role_str = str(st.session_state.role or "admin")

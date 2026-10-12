@@ -30,6 +30,7 @@ from utils.database import (
 from utils.gcs_sync import (
     is_gcs_available,
     list_ofs_in_gcs,
+    invalidate_ofs_cache,
     download_of_pdfs_from_gcs,
     upload_of_excel_to_gcs,
     push_db_to_gcs
@@ -148,6 +149,7 @@ def view_supervision_gcs():
         st.write("")
         st.write("")
         if st.button("🔄 Refrescar", use_container_width=True, help="Limpia la caché y vuelve a consultar el Bucket GCS"):
+            invalidate_ofs_cache()
             st.cache_data.clear()
             st.rerun()
 

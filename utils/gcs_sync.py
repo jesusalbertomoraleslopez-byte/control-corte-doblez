@@ -139,15 +139,12 @@ def pull_data_from_gcp() -> tuple[bool, str]:
     return False, "No se pudo descargar la información de GCP. Verifique su conexión a Internet o credenciales."
 
 def push_db_to_gcs() -> bool:
-    """Sube el archivo sigrama_database.xlsx actual a GCS."""
+    """Sube el archivo sigrama_database.xlsx actual a GCS sin re-parsear openpyxl."""
     b = get_bucket()
     if not b or not LOCAL_EXCEL_PATH.exists():
         return False
     try:
-        # Validar integridad antes de subir
-        _test = pd.ExcelFile(str(LOCAL_EXCEL_PATH))
-        if 'ordenes' not in _test.sheet_names:
-            print("[GCS_SYNC] El archivo local no tiene la hoja 'ordenes'. No se sube.")
+        if LOCAL_EXCEL_PATH.stat().st_size < 5000:
             return False
 
         blob = b.blob(f"database/{EXCEL_DB_NAME}")
@@ -164,10 +161,18 @@ def push_db_to_gcs_async():
     t.start()
 
 # =============================================================================
-# MANIFIESTO Y CONSULTA DE ÓRDENES DE FABRICACIÓN EN GCS
+# MANIFIESTO Y CONSULTA DE ÓRDENES DE FABRICACIÓN EN GCS (CON ÍNDICE EN MEMORIA)
 # =============================================================================
 
 MANIFEST_BLOB_NAME = "ordenes_fabricacion/manifest_ofs.json"
+_OFS_CACHE_LIST = None
+_OFS_CACHE_TS = 0.0
+
+def invalidate_ofs_cache():
+    """Limpia el índice en memoria de OFs en GCS."""
+    global _OFS_CACHE_LIST, _OFS_CACHE_TS
+    _OFS_CACHE_LIST = None
+    _OFS_CACHE_TS = 0.0
 
 def get_gcs_manifest() -> list:
     """Descarga el catálogo/manifiesto de OFs almacenadas en GCS."""
@@ -202,12 +207,17 @@ def save_gcs_manifest(ordenes_list: list) -> bool:
         print(f"[GCS_SYNC] Error al guardar manifiesto GCS: {e}")
         return False
 
-def list_ofs_in_gcs() -> list:
+def list_ofs_in_gcs(force_refresh: bool = False) -> list:
     """
-    Obtiene la lista completa y en tiempo real de OFs disponibles en el bucket GCS.
-    Escanea directamente los blobs bajo 'ordenes_fabricacion/' y los fusiona con el manifiesto
-    para detectar cualquier OF o archivo Excel recién subido al bucket.
+    Obtiene la lista completa de OFs disponibles en el bucket GCS usando índice en memoria (TTL 45s)
+    para evitar llamadas repetitivas de red en cada clic.
     """
+    import time
+    global _OFS_CACHE_LIST, _OFS_CACHE_TS
+    now = time.time()
+    if not force_refresh and _OFS_CACHE_LIST is not None and (now - _OFS_CACHE_TS) < 45.0:
+        return _OFS_CACHE_LIST
+
     manifest_list = get_gcs_manifest()
     ofs_dict = {}
 
@@ -282,13 +292,16 @@ def list_ofs_in_gcs() -> list:
             "completo": completo,
             "tiene_excel": tiene_ex
         })
+    _OFS_CACHE_LIST = result
+    _OFS_CACHE_TS = now
     return result
 
 def download_of_pdfs_from_gcs(of_folder_name: str, target_dir: str) -> dict:
     """
-    Descarga los 3 reportes PDF de una OF desde GCS a una carpeta local/temporal.
+    Descarga los 3 reportes PDF de una OF desde GCS en paralelo usando ThreadPoolExecutor.
     Retorna un diccionario con las rutas locales de {resumen, nido, pieza}.
     """
+    from concurrent.futures import ThreadPoolExecutor
     b = get_bucket()
     if not b:
         raise RuntimeError("No hay conexión con el bucket de GCS.")
@@ -306,32 +319,40 @@ def download_of_pdfs_from_gcs(of_folder_name: str, target_dir: str) -> dict:
         "excel": None
     }
 
+    tasks = []
     for blob in blobs:
         filename = blob.name.split("/")[-1]
         fn_lower = filename.lower()
         if not fn_lower.endswith(".pdf") and not fn_lower.endswith(".xlsx"):
             continue
-
         local_file = dest_path / filename
-        blob.download_to_filename(str(local_file))
+        tasks.append((blob, local_file, fn_lower))
 
-        if fn_lower.endswith(".pdf"):
-            if "resumen" in fn_lower:
-                downloaded["resumen"] = str(local_file)
-            elif "cabezal" in fn_lower or "nido" in fn_lower:
-                downloaded["nido"] = str(local_file)
-            elif "pieza" in fn_lower:
-                downloaded["pieza"] = str(local_file)
-        elif fn_lower.endswith(".xlsx"):
-            downloaded["excel"] = str(local_file)
+    def _dl_one(item):
+        bl, lf, fn_l = item
+        bl.download_to_filename(str(lf))
+        return lf, fn_l
+
+    if tasks:
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            for lf, fn_l in ex.map(_dl_one, tasks):
+                if fn_l.endswith(".pdf"):
+                    if "resumen" in fn_l:
+                        downloaded["resumen"] = str(lf)
+                    elif "cabezal" in fn_l or "nido" in fn_l:
+                        downloaded["nido"] = str(lf)
+                    elif "pieza" in fn_l:
+                        downloaded["pieza"] = str(lf)
+                elif fn_l.endswith(".xlsx"):
+                    downloaded["excel"] = str(lf)
 
     return downloaded
 
-def upload_of_excel_to_gcs(of_folder_name: str, local_excel_path: str = None, excel_bytes: bytes = None, filename: str = None) -> bool:
+def upload_of_excel_to_gcs(of_folder_name: str, local_excel_path: str = None, excel_bytes: bytes = None, filename: bytes = None) -> bool:
     """
     Sube el archivo Excel (.xlsx) generado a la carpeta de la OF en GCS:
     gs://sigrama-corte-doblez-storage/ordenes_fabricacion/{of_folder_name}/{filename}
-    y actualiza el manifiesto en GCS.
+    y actualiza el índice en memoria y manifiesto en GCS.
     """
     b = get_bucket()
     if not b:
@@ -354,8 +375,8 @@ def upload_of_excel_to_gcs(of_folder_name: str, local_excel_path: str = None, ex
             return False
 
         print(f"[GCS_SYNC] Excel subido exitosamente a GCS: {blob_name}")
+        invalidate_ofs_cache()
 
-        # Actualizar manifiesto en GCS en segundo plano para reflejar el nuevo Excel
         def _update_manifest():
             try:
                 manifest = get_gcs_manifest()

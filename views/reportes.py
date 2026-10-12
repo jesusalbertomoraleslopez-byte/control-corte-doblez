@@ -150,206 +150,193 @@ def get_global_wip_for_ofs(of_list):
             total_wip[k] = total_wip.get(k, 0) + v
     return total_wip
 
+@st.cache_data(ttl=45, show_spinner=False)
 def get_wip_pieces_detail(of_list, area):
-    details = []
-    
-    # Si viene "Todas", expandir a todas las OFs en la base de datos
-    if "Todas" in of_list:
-        of_list = get_all_ofs()
-        
-    for of_num in of_list:
-        df_todas = get_todas_piezas(of_num)
-        if df_todas.empty:
-            continue
-            
-        conn = get_connection()
-        df_avances_all = pd.read_sql_query("SELECT no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number=? GROUP BY no_pieza, area", conn, params=(of_num,))
-        df_rechazos_all = pd.read_sql_query("SELECT no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number=? GROUP BY no_pieza, area", conn, params=(of_num,))
-        conn.close()
-        
-        if 'hojas' not in df_todas.columns:
-            df_todas['hojas'] = 1
-        
-        df_todas['total_requeridas'] = pd.to_numeric(df_todas['cantidad'], errors='coerce').fillna(0) * pd.to_numeric(df_todas['hojas'], errors='coerce').fillna(1)
-        
-        if area == "Corte":
-            conn = get_connection()
-            c = conn.cursor()
-            c.execute("""
-                SELECT n.nido 
-                FROM nidos n 
-                LEFT JOIN avances a ON n.of_number = a.of_number AND n.nido = a.nido AND a.area = 'Corte'
-                WHERE n.of_number = ?
-                GROUP BY n.nido, n.hojas
-                HAVING COUNT(DISTINCT a.hoja) >= n.hojas
-            """, (of_num,))
-            terminados = [row[0] for row in c.fetchall()]
-            conn.close()
-            
-            df_corte_pend = df_todas[~df_todas['nido'].isin(terminados)]
-            if not df_corte_pend.empty:
-                conn = get_connection()
-                c_av = conn.cursor()
-                df_g_list = []
-                for (no_p, nom_p), grp in df_corte_pend.groupby(['no_pieza', 'nombre_pieza']):
-                    c_av.execute(
-                        "SELECT SUM(cantidad) FROM avances "
-                        "WHERE of_number=? AND no_pieza=? AND area='Corte'",
-                        (of_num, no_p)
-                    )
-                    avanzado_p = c_av.fetchone()[0] or 0
-                    total_req_p = grp['total_requeridas'].sum()
-                    faltante_p = max(0, total_req_p - avanzado_p)
-                    if faltante_p > 0:
-                        df_g_list.append({
-                            'no_pieza': no_p,
-                            'nombre_pieza': nom_p,
-                            'cantidad_wip': int(faltante_p),
-                            'of_number': of_num
-                        })
-                conn.close()
-                if df_g_list:
-                    df_g = pd.DataFrame(df_g_list)
-                    details.append(df_g)
-        else:
-            df_piezas = df_todas.copy()
-            df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in [p.strip() for p in str(x).split(',') if p.strip()])
-            df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
-            
-            if df_piezas.empty:
-                continue
-                
-            df_piezas['area_anterior'] = df_piezas['ruta'].apply(lambda x: get_area_anterior(x, area))
-            df_agrupado = df_piezas.groupby(['no_pieza', 'nombre_pieza']).agg({
-                'total_requeridas': 'sum',
-                'area_anterior': 'first'
-            }).reset_index()
-            
-            def get_wip(row):
-                area_ant = row['area_anterior']
-                if pd.isna(area_ant) or not area_ant: return 0
-                wip = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['area'] == area_ant)]['cantidad'].sum()
-                return int(wip)
-                
-            def get_terminadas_ant(row):
-                term = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['area'] == area)]['cantidad'].sum()
-                return int(term)
-                
-            def get_rechazadas_ant(row):
-                rech = df_rechazos_all[(df_rechazos_all['no_pieza'] == row['no_pieza']) & (df_rechazos_all['area'] == area)]['cantidad'].sum()
-                return int(rech)
-                
-            df_agrupado['wip'] = df_agrupado.apply(get_wip, axis=1)
-            df_agrupado['term'] = df_agrupado.apply(get_terminadas_ant, axis=1)
-            df_agrupado['rech'] = df_agrupado.apply(get_rechazadas_ant, axis=1)
-            
-            df_agrupado['pendiente_disp'] = df_agrupado['wip'] - df_agrupado['term'] - df_agrupado['rech']
-            df_agrupado['pendiente_disp'] = df_agrupado['pendiente_disp'].apply(lambda x: max(0, x))
-            
-            df_g = df_agrupado[df_agrupado['pendiente_disp'] > 0][['no_pieza', 'nombre_pieza', 'pendiente_disp']].copy()
-            if not df_g.empty:
-                df_g['of_number'] = of_num
-                df_g.rename(columns={'pendiente_disp': 'cantidad_wip'}, inplace=True)
-                details.append(df_g)
-                
-    if not details:
+    if not of_list:
         return pd.DataFrame(columns=['OF', 'No. Pieza', 'Descripción', 'Cantidad WIP'])
-        
-    df_res = pd.concat(details, ignore_index=True)
-    df_res.rename(columns={
+
+    is_todas = "Todas" in of_list
+    df_todas = get_todas_piezas("Todas" if is_todas else None)
+    if not is_todas and not df_todas.empty:
+        df_todas = df_todas[df_todas['of_number'].isin(of_list)].copy()
+
+    if df_todas.empty:
+        return pd.DataFrame(columns=['OF', 'No. Pieza', 'Descripción', 'Cantidad WIP'])
+
+    if 'hojas' not in df_todas.columns:
+        df_todas['hojas'] = 1
+    df_todas['total_requeridas'] = (
+        pd.to_numeric(df_todas['cantidad'], errors='coerce').fillna(0)
+        * pd.to_numeric(df_todas['hojas'], errors='coerce').fillna(1)
+    )
+
+    conn = get_connection()
+    if is_todas:
+        df_avances_all = pd.read_sql_query(
+            "SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances GROUP BY of_number, no_pieza, area",
+            conn
+        )
+        df_rechazos_all = pd.read_sql_query(
+            "SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos GROUP BY of_number, no_pieza, area",
+            conn
+        )
+    else:
+        placeholders = ','.join(['?'] * len(of_list))
+        df_avances_all = pd.read_sql_query(
+            f"SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number IN ({placeholders}) GROUP BY of_number, no_pieza, area",
+            conn, params=list(of_list)
+        )
+        df_rechazos_all = pd.read_sql_query(
+            f"SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number IN ({placeholders}) GROUP BY of_number, no_pieza, area",
+            conn, params=list(of_list)
+        )
+
+    if area == "Corte":
+        c = conn.cursor()
+        c.execute("""
+            SELECT n.of_number, n.nido 
+            FROM nidos n 
+            LEFT JOIN avances a ON n.of_number = a.of_number AND n.nido = a.nido AND a.area = 'Corte'
+            GROUP BY n.of_number, n.nido, n.hojas
+            HAVING COUNT(DISTINCT a.hoja) >= n.hojas
+        """)
+        terminados_set = set((row[0], row[1]) for row in c.fetchall())
+        conn.close()
+
+        mask_pend = ~df_todas.set_index(['of_number', 'nido']).index.isin(terminados_set)
+        df_corte_pend = df_todas[mask_pend]
+        if df_corte_pend.empty:
+            return pd.DataFrame(columns=['OF', 'No. Pieza', 'Descripción', 'Cantidad WIP'])
+
+        df_req_grp = (
+            df_corte_pend.groupby(['of_number', 'no_pieza', 'nombre_pieza'], as_index=False)['total_requeridas']
+            .sum()
+        )
+        df_av_corte = df_avances_all[df_avances_all['area'] == 'Corte'][['of_number', 'no_pieza', 'cantidad']]
+        df_merged = df_req_grp.merge(df_av_corte, on=['of_number', 'no_pieza'], how='left')
+        df_merged['cantidad'] = df_merged['cantidad'].fillna(0)
+        df_merged['Cantidad WIP'] = (df_merged['total_requeridas'] - df_merged['cantidad']).clip(lower=0).astype(int)
+        df_merged = df_merged[df_merged['Cantidad WIP'] > 0]
+        df_merged.rename(columns={
+            'of_number': 'OF',
+            'no_pieza': 'No. Pieza',
+            'nombre_pieza': 'Descripción'
+        }, inplace=True)
+        return df_merged[['OF', 'No. Pieza', 'Descripción', 'Cantidad WIP']].reset_index(drop=True)
+
+    conn.close()
+    df_piezas = df_todas.copy()
+    df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(
+        lambda x: area in [p.strip() for p in str(x).split(',') if p.strip()]
+    )
+    df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
+    if df_piezas.empty:
+        return pd.DataFrame(columns=['OF', 'No. Pieza', 'Descripción', 'Cantidad WIP'])
+
+    df_piezas['area_anterior'] = df_piezas['ruta'].apply(lambda x: get_area_anterior(x, area))
+    df_agrupado = df_piezas.groupby(['of_number', 'no_pieza', 'nombre_pieza'], as_index=False).agg({
+        'total_requeridas': 'sum',
+        'area_anterior': 'first'
+    })
+
+    av_map = df_avances_all.set_index(['of_number', 'no_pieza', 'area'])['cantidad'].to_dict() if not df_avances_all.empty else {}
+    rec_map = df_rechazos_all.set_index(['of_number', 'no_pieza', 'area'])['cantidad'].to_dict() if not df_rechazos_all.empty else {}
+
+    df_agrupado['wip'] = [
+        int(av_map.get((r['of_number'], r['no_pieza'], r['area_anterior']), 0)) if pd.notna(r['area_anterior']) and r['area_anterior'] else 0
+        for _, r in df_agrupado.iterrows()
+    ]
+    df_agrupado['term'] = [
+        int(av_map.get((r['of_number'], r['no_pieza'], area), 0))
+        for _, r in df_agrupado.iterrows()
+    ]
+    df_agrupado['rech'] = [
+        int(rec_map.get((r['of_number'], r['no_pieza'], area), 0))
+        for _, r in df_agrupado.iterrows()
+    ]
+    df_agrupado['Cantidad WIP'] = (df_agrupado['wip'] - df_agrupado['term'] - df_agrupado['rech']).clip(lower=0).astype(int)
+    df_res = df_agrupado[df_agrupado['Cantidad WIP'] > 0].rename(columns={
         'of_number': 'OF',
         'no_pieza': 'No. Pieza',
-        'nombre_pieza': 'Descripción',
-        'cantidad_wip': 'Cantidad WIP'
-    }, inplace=True)
-    
-    df_res = df_res[['OF', 'No. Pieza', 'Descripción', 'Cantidad WIP']]
-    df_res['Cantidad WIP'] = df_res['Cantidad WIP'].astype(int)
-    return df_res
+        'nombre_pieza': 'Descripción'
+    })
+    return df_res[['OF', 'No. Pieza', 'Descripción', 'Cantidad WIP']].reset_index(drop=True)
 
+@st.cache_data(ttl=60, show_spinner=False)
 def calculate_wip_on_date(of_list, target_date_str):
     limit_timestamp = f"{target_date_str} 23:59:59"
-    
+    relevant_procs = [p for p in PROCESSES if p != "Ingenieria"]
+    wip_por_area = {area: 0 for area in relevant_procs}
+    if not of_list:
+        return wip_por_area
+
+    is_todas = "Todas" in of_list
+    df_todas = get_todas_piezas("Todas" if is_todas else None)
+    if not is_todas and not df_todas.empty:
+        df_todas = df_todas[df_todas['of_number'].isin(of_list)].copy()
+    if df_todas.empty:
+        return wip_por_area
+
+    if 'hojas' not in df_todas.columns:
+        df_todas['hojas'] = 1
+    df_todas['total_requeridas'] = (
+        pd.to_numeric(df_todas['cantidad'], errors='coerce').fillna(0)
+        * pd.to_numeric(df_todas['hojas'], errors='coerce').fillna(1)
+    )
+
     conn = get_connection()
     c = conn.cursor()
-    if "Todas" in of_list:
+    if is_todas:
         c.execute("SELECT of_number, nido FROM avances WHERE area = 'Corte' AND timestamp <= ?", (limit_timestamp,))
         terminados_tuples = set((row[0], row[1]) for row in c.fetchall())
+        df_avances_all = pd.read_sql_query(
+            "SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE timestamp <= ? GROUP BY of_number, no_pieza, area",
+            conn, params=(limit_timestamp,)
+        )
+        df_rechazos_all = pd.read_sql_query(
+            "SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE timestamp <= ? GROUP BY of_number, no_pieza, area",
+            conn, params=(limit_timestamp,)
+        )
     else:
         placeholders = ','.join(['?'] * len(of_list))
         c.execute(f"SELECT of_number, nido FROM avances WHERE area = 'Corte' AND timestamp <= ? AND of_number IN ({placeholders})", [limit_timestamp] + list(of_list))
         terminados_tuples = set((row[0], row[1]) for row in c.fetchall())
+        df_avances_all = pd.read_sql_query(
+            f"SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE timestamp <= ? AND of_number IN ({placeholders}) GROUP BY of_number, no_pieza, area",
+            conn, params=[limit_timestamp] + list(of_list)
+        )
+        df_rechazos_all = pd.read_sql_query(
+            f"SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE timestamp <= ? AND of_number IN ({placeholders}) GROUP BY of_number, no_pieza, area",
+            conn, params=[limit_timestamp] + list(of_list)
+        )
     conn.close()
-    
-    wip_por_area = {}
-    relevant_procs = [p for p in PROCESSES if p != "Ingenieria"]
-    actual_ofs = get_all_ofs() if "Todas" in of_list else of_list
-    
+
+    av_map = df_avances_all.set_index(['of_number', 'no_pieza', 'area'])['cantidad'].to_dict() if not df_avances_all.empty else {}
+    rec_map = df_rechazos_all.set_index(['of_number', 'no_pieza', 'area'])['cantidad'].to_dict() if not df_rechazos_all.empty else {}
+
     for area in relevant_procs:
-        total_wip_area = 0
-        
-        for of_num in actual_ofs:
-            df_todas = get_todas_piezas(of_num)
-            if df_todas.empty:
+        if area == "Corte":
+            mask_pend = ~df_todas.set_index(['of_number', 'nido']).index.isin(terminados_tuples)
+            wip_por_area[area] = int(df_todas[mask_pend]['total_requeridas'].sum())
+        else:
+            df_piezas = df_todas[df_todas['ruta'].apply(lambda x: area in [p.strip() for p in str(x).split(',') if p.strip()])].copy()
+            if df_piezas.empty:
+                wip_por_area[area] = 0
                 continue
-                
-            if 'hojas' not in df_todas.columns:
-                df_todas['hojas'] = 1
-            df_todas['total_requeridas'] = pd.to_numeric(df_todas['cantidad'], errors='coerce').fillna(0) * pd.to_numeric(df_todas['hojas'], errors='coerce').fillna(1)
-            
-            conn = get_connection()
-            df_avances_all = pd.read_sql_query(
-                "SELECT no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number=? AND timestamp <= ? GROUP BY no_pieza, area",
-                conn, params=(of_num, limit_timestamp)
-            )
-            df_rechazos_all = pd.read_sql_query(
-                "SELECT no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number=? AND timestamp <= ? GROUP BY no_pieza, area",
-                conn, params=(of_num, limit_timestamp)
-            )
-            conn.close()
-            
-            if area == "Corte":
-                df_corte_pend = df_todas[~df_todas.apply(lambda row: (row['of_number'], row['nido']) in terminados_tuples, axis=1)]
-                total_wip_area += int(df_corte_pend['total_requeridas'].sum())
-            else:
-                df_piezas = df_todas.copy()
-                df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in [p.strip() for p in str(x).split(',') if p.strip()])
-                df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
-                
-                if df_piezas.empty:
-                    continue
-                    
-                df_piezas['area_anterior'] = df_piezas['ruta'].apply(lambda x: get_area_anterior(x, area))
-                df_agrupado = df_piezas.groupby('no_pieza').agg({
-                    'total_requeridas': 'sum',
-                    'area_anterior': 'first'
-                }).reset_index()
-                
-                def get_wip(row):
-                    area_ant = row['area_anterior']
-                    if pd.isna(area_ant) or not area_ant: return 0
-                    wip = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['area'] == area_ant)]['cantidad'].sum()
-                    return int(wip)
-                    
-                def get_terminadas_ant(row):
-                    term = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['area'] == area)]['cantidad'].sum()
-                    return int(term)
-                    
-                def get_rechazadas_ant(row):
-                    rech = df_rechazos_all[(df_rechazos_all['no_pieza'] == row['no_pieza']) & (df_rechazos_all['area'] == area)]['cantidad'].sum()
-                    return int(rech)
-                    
-                df_agrupado['wip'] = df_agrupado.apply(get_wip, axis=1)
-                df_agrupado['term'] = df_agrupado.apply(get_terminadas_ant, axis=1)
-                df_agrupado['rech'] = df_agrupado.apply(get_rechazadas_ant, axis=1)
-                
-                df_agrupado['pendiente_disp'] = df_agrupado['wip'] - df_agrupado['term'] - df_agrupado['rech']
-                df_agrupado['pendiente_disp'] = df_agrupado['pendiente_disp'].apply(lambda x: max(0, x))
-                
-                total_wip_area += int(df_agrupado['pendiente_disp'].sum())
-                
-        wip_por_area[area] = total_wip_area
-        
+            df_piezas['area_anterior'] = df_piezas['ruta'].apply(lambda x: get_area_anterior(x, area))
+            df_agrupado = df_piezas.groupby(['of_number', 'no_pieza'], as_index=False).agg({
+                'total_requeridas': 'sum',
+                'area_anterior': 'first'
+            })
+            total_area = 0
+            for _, r in df_agrupado.iterrows():
+                a_ant = r['area_anterior']
+                w_val = int(av_map.get((r['of_number'], r['no_pieza'], a_ant), 0)) if pd.notna(a_ant) and a_ant else 0
+                t_val = int(av_map.get((r['of_number'], r['no_pieza'], area), 0))
+                r_val = int(rec_map.get((r['of_number'], r['no_pieza'], area), 0))
+                total_area += max(0, w_val - t_val - r_val)
+            wip_por_area[area] = total_area
+
     return wip_por_area
 
 def style_excel_sheet(writer, df, sheet_name):
