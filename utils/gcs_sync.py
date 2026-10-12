@@ -204,64 +204,85 @@ def save_gcs_manifest(ordenes_list: list) -> bool:
 
 def list_ofs_in_gcs() -> list:
     """
-    Obtiene la lista completa de OFs disponibles en el bucket GCS.
-    Primero consulta el manifiesto; si está vacío, escanea los blobs.
+    Obtiene la lista completa y en tiempo real de OFs disponibles en el bucket GCS.
+    Escanea directamente los blobs bajo 'ordenes_fabricacion/' y los fusiona con el manifiesto
+    para detectar cualquier OF o archivo Excel recién subido al bucket.
     """
-    manifest = get_gcs_manifest()
-    if manifest:
-        return manifest
+    manifest_list = get_gcs_manifest()
+    ofs_dict = {}
 
-    # Fallback: escanear prefijos en el bucket
+    for item in manifest_list:
+        of_n = item.get("of_nombre")
+        if of_n:
+            ofs_dict[of_n] = {
+                "of_nombre": of_n,
+                "etiqueta": item.get("etiqueta", of_n),
+                "subcarpeta": item.get("subcarpeta", ""),
+                "archivos": list(item.get("archivos", [])),
+                "resumen_pdf": item.get("resumen_pdf"),
+                "nido_pdf": item.get("nido_pdf"),
+                "pieza_pdf": item.get("pieza_pdf"),
+                "excel_existente": item.get("excel_existente"),
+                "completo": bool(item.get("completo")),
+                "tiene_excel": bool(item.get("excel_existente") or item.get("tiene_excel"))
+            }
+
     b = get_bucket()
-    if not b:
-        return []
-    try:
-        blobs = list(b.list_blobs(prefix="ordenes_fabricacion/"))
-        ofs_dict = {}
-        for blob in blobs:
-            parts = blob.name.split("/")
-            if len(parts) >= 3 and parts[0] == "ordenes_fabricacion":
-                of_folder = parts[1]
-                filename = parts[-1]
-                if of_folder not in ofs_dict:
-                    ofs_dict[of_folder] = {
-                        "of_nombre": of_folder,
-                        "archivos": [],
-                        "resumen_pdf": None,
-                        "nido_pdf": None,
-                        "pieza_pdf": None,
-                        "excel_existente": None
-                    }
-                ofs_dict[of_folder]["archivos"].append(filename)
-                fn_lower = filename.lower()
-                if fn_lower.endswith(".pdf"):
-                    if "resumen" in fn_lower:
-                        ofs_dict[of_folder]["resumen_pdf"] = filename
-                    elif "cabezal" in fn_lower or "nido" in fn_lower:
-                        ofs_dict[of_folder]["nido_pdf"] = filename
-                    elif "pieza" in fn_lower:
-                        ofs_dict[of_folder]["pieza_pdf"] = filename
-                elif fn_lower.endswith(".xlsx") and not fn_lower.startswith("~$"):
-                    ofs_dict[of_folder]["excel_existente"] = filename
+    if b:
+        try:
+            blobs = list(b.list_blobs(prefix="ordenes_fabricacion/"))
+            for blob in blobs:
+                parts = blob.name.split("/")
+                if len(parts) >= 3 and parts[0] == "ordenes_fabricacion":
+                    of_folder = parts[1]
+                    filename = parts[-1]
+                    if not filename or of_folder == "manifest_ofs.json":
+                        continue
+                    if of_folder not in ofs_dict:
+                        ofs_dict[of_folder] = {
+                            "of_nombre": of_folder,
+                            "etiqueta": of_folder,
+                            "subcarpeta": "",
+                            "archivos": [],
+                            "resumen_pdf": None,
+                            "nido_pdf": None,
+                            "pieza_pdf": None,
+                            "excel_existente": None,
+                            "completo": False,
+                            "tiene_excel": False
+                        }
+                    if filename not in ofs_dict[of_folder]["archivos"]:
+                        ofs_dict[of_folder]["archivos"].append(filename)
 
-        result = []
-        for of_f, data in sorted(ofs_dict.items()):
-            completo = bool(data["resumen_pdf"] and data["nido_pdf"] and data["pieza_pdf"])
-            result.append({
-                "of_nombre": of_f,
-                "etiqueta": of_f,
-                "subcarpeta": "",
-                "resumen_pdf": data["resumen_pdf"],
-                "nido_pdf": data["nido_pdf"],
-                "pieza_pdf": data["pieza_pdf"],
-                "excel_existente": data["excel_existente"],
-                "completo": completo,
-                "tiene_excel": bool(data["excel_existente"])
-            })
-        return result
-    except Exception as e:
-        print(f"[GCS_SYNC] Error escaneando GCS: {e}")
-        return []
+                    fn_lower = filename.lower()
+                    if fn_lower.endswith(".pdf"):
+                        if "resumen" in fn_lower:
+                            ofs_dict[of_folder]["resumen_pdf"] = filename
+                        elif "cabezal" in fn_lower or "nido" in fn_lower:
+                            ofs_dict[of_folder]["nido_pdf"] = filename
+                        elif "pieza" in fn_lower:
+                            ofs_dict[of_folder]["pieza_pdf"] = filename
+                    elif fn_lower.endswith(".xlsx") and not fn_lower.startswith("~$"):
+                        ofs_dict[of_folder]["excel_existente"] = filename
+        except Exception as e:
+            print(f"[GCS_SYNC] Error escaneando blobs en GCS: {e}")
+
+    result = []
+    for of_f, data in sorted(ofs_dict.items()):
+        completo = bool(data.get("resumen_pdf") and data.get("nido_pdf") and data.get("pieza_pdf"))
+        tiene_ex = bool(data.get("excel_existente") or data.get("tiene_excel"))
+        result.append({
+            "of_nombre": of_f,
+            "etiqueta": data.get("etiqueta", of_f),
+            "subcarpeta": data.get("subcarpeta", ""),
+            "resumen_pdf": data.get("resumen_pdf"),
+            "nido_pdf": data.get("nido_pdf"),
+            "pieza_pdf": data.get("pieza_pdf"),
+            "excel_existente": data.get("excel_existente"),
+            "completo": completo,
+            "tiene_excel": tiene_ex
+        })
+    return result
 
 def download_of_pdfs_from_gcs(of_folder_name: str, target_dir: str) -> dict:
     """
@@ -306,17 +327,51 @@ def download_of_pdfs_from_gcs(of_folder_name: str, target_dir: str) -> dict:
 
     return downloaded
 
-def upload_of_excel_to_gcs(of_folder_name: str, local_excel_path: str) -> bool:
-    """Sube el archivo Excel generado a la carpeta de la OF en GCS."""
+def upload_of_excel_to_gcs(of_folder_name: str, local_excel_path: str = None, excel_bytes: bytes = None, filename: str = None) -> bool:
+    """
+    Sube el archivo Excel (.xlsx) generado a la carpeta de la OF en GCS:
+    gs://sigrama-corte-doblez-storage/ordenes_fabricacion/{of_folder_name}/{filename}
+    y actualiza el manifiesto en GCS.
+    """
     b = get_bucket()
-    if not b or not os.path.exists(local_excel_path):
+    if not b:
         return False
     try:
-        filename = os.path.basename(local_excel_path)
-        blob_name = f"ordenes_fabricacion/{of_folder_name}/{filename}"
-        blob = b.blob(blob_name)
-        blob.upload_from_filename(local_excel_path)
-        print(f"[GCS_SYNC] Excel subido a GCS: {blob_name}")
+        if excel_bytes is not None:
+            fname = filename or f"{of_folder_name}.xlsx"
+            blob_name = f"ordenes_fabricacion/{of_folder_name}/{fname}"
+            blob = b.blob(blob_name)
+            blob.upload_from_string(
+                excel_bytes,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        elif local_excel_path and os.path.exists(local_excel_path):
+            fname = filename or os.path.basename(local_excel_path)
+            blob_name = f"ordenes_fabricacion/{of_folder_name}/{fname}"
+            blob = b.blob(blob_name)
+            blob.upload_from_filename(local_excel_path)
+        else:
+            return False
+
+        print(f"[GCS_SYNC] Excel subido exitosamente a GCS: {blob_name}")
+
+        # Actualizar manifiesto en GCS en segundo plano para reflejar el nuevo Excel
+        def _update_manifest():
+            try:
+                manifest = get_gcs_manifest()
+                updated = False
+                for item in manifest:
+                    if item.get("of_nombre") == of_folder_name:
+                        item["excel_existente"] = fname
+                        item["tiene_excel"] = True
+                        updated = True
+                        break
+                if updated:
+                    save_gcs_manifest(manifest)
+            except Exception as em:
+                print(f"[GCS_SYNC] Aviso al actualizar manifiesto con Excel: {em}")
+
+        threading.Thread(target=_update_manifest, daemon=True).start()
         return True
     except Exception as e:
         print(f"[GCS_SYNC] Error al subir Excel a GCS: {e}")

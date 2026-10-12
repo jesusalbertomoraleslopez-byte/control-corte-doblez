@@ -196,6 +196,11 @@ def save_db_to_excel(conn=None):
         if os.path.exists(EXCEL_DB_PATH):
             global _last_excel_mtime
             _last_excel_mtime = os.path.getmtime(EXCEL_DB_PATH)
+            try:
+                from utils.gcs_sync import push_db_to_gcs_async
+                push_db_to_gcs_async()
+            except Exception:
+                pass
     except Exception as e:
         print(f"Error al guardar base de datos a Excel: {e}")
         if os.path.exists(temp_excel):

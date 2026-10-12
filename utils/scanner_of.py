@@ -13,7 +13,7 @@ except Exception:
 def cargar_catalogo_pos_app():
     """
     Carga el catálogo de Órdenes de Compra (POs) registradas en la App de POs
-    (desde po_tracker.db o BD_POs_Cabecera.xlsx).
+    (desde po_tracker.db, BD_POs_Cabecera.xlsx o el bucket gs://sigrama-po-tracker-storage).
     """
     possible_paths = [
         r"C:\Users\albertol\.gemini\antigravity\scratch\sigrama_po_tracker\data\po_tracker.db",
@@ -44,6 +44,44 @@ def cargar_catalogo_pos_app():
                         return df
             except Exception:
                 pass
+
+    # Fallback a Google Cloud Storage (gs://sigrama-po-tracker-storage)
+    try:
+        import io
+        import tempfile
+        from google.cloud import storage
+        client = storage.Client()
+        bucket = client.bucket("sigrama-po-tracker-storage")
+
+        # 1. Intentar desde po_tracker.db en GCS
+        blob_db = bucket.blob("data/po_tracker.db")
+        if blob_db.exists():
+            tmp_db = os.path.join(tempfile.gettempdir(), "po_tracker_gcs_cache.db")
+            blob_db.download_to_filename(tmp_db)
+            conn = sqlite3.connect(tmp_db, timeout=10)
+            df = pd.read_sql('''
+                SELECT po, id_interno, proyecto, solicitante, destino, cliente_facturar_a, estatus_general 
+                FROM po_cabecera 
+                ORDER BY 
+                    CASE WHEN id_interno IS NOT NULL AND id_interno != '' THEN 0 ELSE 1 END ASC,
+                    id_interno DESC, 
+                    po DESC
+            ''', conn)
+            conn.close()
+            if not df.empty:
+                return df
+
+        # 2. Intentar desde BD_POs_Cabecera.xlsx en GCS
+        blob_xl = bucket.blob("data/sync_databases/BD_POs_Cabecera.xlsx")
+        if blob_xl.exists():
+            df = pd.read_excel(io.BytesIO(blob_xl.download_as_bytes()))
+            if not df.empty:
+                col_map = {c: str(c).lower().strip() for c in df.columns}
+                df = df.rename(columns=col_map)
+                return df
+    except Exception as e:
+        print(f"[SCANNER_OF] Aviso consultando catálogo POs en GCS: {e}")
+
     return pd.DataFrame()
 
 def obtener_opciones_po():
