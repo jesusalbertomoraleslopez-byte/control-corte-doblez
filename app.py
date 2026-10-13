@@ -13,6 +13,53 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# === SIGRAMA FORM CONTRAST (estandar visual de campos) ===
+st.markdown("""
+<style>
+    /* Escritorio de la app: gris claro para que los campos blancos resalten */
+    html body .stApp, html body [data-testid="stAppViewContainer"], html body [data-testid="stMain"] {
+        background-color: #EEF2F6 !important;
+    }
+    /* Campos de texto / numero / fecha: fondo blanco + borde oscuro bien visible */
+    [data-testid="stMain"] div[data-baseweb="input"],
+    [data-testid="stMain"] div[data-baseweb="textarea"],
+    [data-testid="stMain"] div[data-baseweb="select"] > div,
+    [data-testid="stDialog"] div[data-baseweb="input"],
+    [data-testid="stDialog"] div[data-baseweb="textarea"],
+    [data-testid="stDialog"] div[data-baseweb="select"] > div {
+        background-color: #FFFFFF !important;
+        border: 1.5px solid #64748B !important;
+        border-radius: 6px !important;
+        box-shadow: 0 1px 2px rgba(15,23,42,0.08) !important;
+    }
+    [data-testid="stMain"] div[data-baseweb="base-input"],
+    [data-testid="stDialog"] div[data-baseweb="base-input"] {
+        background-color: #FFFFFF !important;
+        border: none !important;
+    }
+    [data-testid="stMain"] input, [data-testid="stMain"] textarea,
+    [data-testid="stDialog"] input, [data-testid="stDialog"] textarea {
+        background-color: #FFFFFF !important;
+        color: #111111 !important;
+        -webkit-text-fill-color: #111111 !important;
+    }
+    /* Foco: borde rojo corporativo */
+    [data-testid="stMain"] div[data-baseweb="input"]:focus-within,
+    [data-testid="stMain"] div[data-baseweb="textarea"]:focus-within,
+    [data-testid="stMain"] div[data-baseweb="select"]:focus-within > div,
+    [data-testid="stDialog"] div[data-baseweb="input"]:focus-within,
+    [data-testid="stDialog"] div[data-baseweb="select"]:focus-within > div {
+        border-color: #EC2024 !important;
+        box-shadow: 0 0 0 3px rgba(236,32,36,0.18) !important;
+    }
+    /* Etiquetas legibles */
+    [data-testid="stMain"] [data-testid="stWidgetLabel"] p {
+        color: #1E293B !important;
+        font-weight: 700 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 components.html("""
 <script>
 (function() {
