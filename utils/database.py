@@ -1251,12 +1251,21 @@ def marcar_avance_completo_area(of_number: str, area: str, operador: str = "Kanb
                 c.execute("SELECT DISTINCT hoja FROM avances WHERE of_number = ? AND nido = ? AND area = 'Corte' AND hoja IS NOT NULL", (of_number, nido_id))
                 hojas_registradas = {r[0] for r in c.fetchall()}
 
+                c.execute("SELECT no_pieza, cantidad FROM piezas WHERE of_number = ? AND nido = ?", (of_number, nido_id))
+                piezas_nido = c.fetchall()
+
                 for h in range(1, total_h + 1):
                     if h not in hojas_registradas:
                         c.execute(
                             "INSERT INTO avances (of_number, nido, no_pieza, area, cantidad, operador, maquina, hoja, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                             (of_number, nido_id, "", "Corte", 1, operador, maquina, h, now)
                         )
+                        for no_p, cant_p in piezas_nido:
+                            if cant_p and cant_p > 0:
+                                c.execute(
+                                    "INSERT INTO avances (of_number, nido, no_pieza, area, cantidad, operador, maquina, hoja, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                    (of_number, nido_id, no_p, "Corte", int(cant_p), operador, maquina, h, now)
+                                )
 
         elif area in ["Doblez", "Pintura", "Liberado", "Empaque", "Rebabeo"]:
             c.execute("""
@@ -1305,6 +1314,152 @@ def marcar_avance_completo_area(of_number: str, area: str, operador: str = "Kanb
         except Exception:
             pass
         return False
+
+
+def calculate_wip_dataframe(df_piezas_base: pd.DataFrame, area_seleccionada: str, of_number: str = "Todas") -> pd.DataFrame:
+    """
+    Calcula de manera precisa y unificada las piezas disponibles en WIP para un área específica.
+    Resuelve correctamente el flujo de producción (Corte -> [Rebabeo] -> Doblez -> Pintura -> Liberado):
+    - Si el proceso anterior inmediato (ej. Rebabeo) no tiene avances registrados en el sistema,
+      toma el WIP del proceso previo (Corte), garantizando que las piezas cortadas aparezcan
+      disponibles inmediatamente en Doblez.
+    - Soporta registro de Corte tanto por piezas como por hojas de nido.
+    """
+    cols_vacias = [
+        'of_number', 'no_pieza', 'nombre_pieza', 'total_requeridas', 
+        'Pendiente Disponible', 'terminadas_ant', 'rechazadas_ant', 
+        'Pendiente Total OF', 'area_anterior', 'wip'
+    ]
+    if df_piezas_base is None or df_piezas_base.empty:
+        return pd.DataFrame(columns=cols_vacias)
+
+    df_p = df_piezas_base.copy()
+    if 'hojas' not in df_p.columns:
+        df_p['hojas'] = 1
+    df_p['hojas'] = pd.to_numeric(df_p['hojas'], errors='coerce').fillna(1).astype(int)
+    df_p['cantidad'] = pd.to_numeric(df_p['cantidad'], errors='coerce').fillna(0).astype(int)
+    df_p['total_requeridas'] = df_p['cantidad'] * df_p['hojas']
+
+    # Filtrar solo piezas cuya ruta incluya el área seleccionada
+    df_p['pasa_por_aqui'] = df_p['ruta'].apply(
+        lambda x: area_seleccionada in [p.strip() for p in str(x).split(',') if p.strip()]
+    )
+    df_p = df_p[df_p['pasa_por_aqui']]
+    if df_p.empty:
+        return pd.DataFrame(columns=cols_vacias)
+
+    conn = get_connection()
+    c = conn.cursor()
+    if of_number == "Todas" or of_number is None:
+        c.execute("""
+            SELECT of_number, nido, COUNT(DISTINCT hoja) 
+            FROM avances 
+            WHERE area='Corte' AND hoja IS NOT NULL 
+            GROUP BY of_number, nido
+        """)
+        hojas_cortadas_dict = {(str(r[0]), str(r[1])): r[2] for r in c.fetchall()}
+        df_avances_all = pd.read_sql_query(
+            "SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances GROUP BY of_number, no_pieza, area", 
+            conn
+        )
+        df_rechazos_all = pd.read_sql_query(
+            "SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos GROUP BY of_number, no_pieza, area", 
+            conn
+        )
+    else:
+        c.execute("""
+            SELECT of_number, nido, COUNT(DISTINCT hoja) 
+            FROM avances 
+            WHERE of_number=? AND area='Corte' AND hoja IS NOT NULL 
+            GROUP BY of_number, nido
+        """, (of_number,))
+        hojas_cortadas_dict = {(str(r[0]), str(r[1])): r[2] for r in c.fetchall()}
+        df_avances_all = pd.read_sql_query(
+            "SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number=? GROUP BY of_number, no_pieza, area", 
+            conn, params=(of_number,)
+        )
+        df_rechazos_all = pd.read_sql_query(
+            "SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number=? GROUP BY of_number, no_pieza, area", 
+            conn, params=(of_number,)
+        )
+    conn.close()
+
+    # Pre-indexar avances y rechazos para velocidad extrema
+    av_map = {}
+    if not df_avances_all.empty:
+        for _, r in df_avances_all.iterrows():
+            av_map[(str(r['of_number']), str(r['no_pieza']), str(r['area']))] = int(r['cantidad'] or 0)
+
+    rec_map = {}
+    if not df_rechazos_all.empty:
+        for _, r in df_rechazos_all.iterrows():
+            rec_map[(str(r['of_number']), str(r['no_pieza']), str(r['area']))] = int(r['cantidad'] or 0)
+
+    # Agrupar piezas por OF y número de parte
+    df_agrupado = df_p.groupby(['of_number', 'no_pieza'], as_index=False).agg({
+        'nombre_pieza': 'first',
+        'total_requeridas': 'sum',
+        'ruta': 'first'
+    })
+
+    def resolve_wip_and_origin(row):
+        of_n = str(row['of_number'])
+        p_no = str(row['no_pieza'])
+        ruta_str = str(row.get('ruta', ''))
+        procesos = [p.strip() for p in ruta_str.split(',') if p.strip()]
+        if area_seleccionada not in procesos:
+            return 0, ""
+        idx = procesos.index(area_seleccionada)
+        procesos_previos = [p for p in procesos[:idx] if p != 'Ingenieria']
+
+        for p_prev in reversed(procesos_previos):
+            if p_prev == 'Corte':
+                pzas_direct = av_map.get((of_n, p_no, 'Corte'), 0)
+                # Calcular piezas por hojas cortadas en los nidos
+                pzas_nidos = df_p[(df_p['of_number'] == of_n) & (df_p['no_pieza'] == p_no)]
+                pzas_por_hojas = 0
+                for _, prow in pzas_nidos.iterrows():
+                    h_cort = hojas_cortadas_dict.get((of_n, str(prow['nido'])), 0)
+                    h_tot = int(prow['hojas'] or 1)
+                    pzas_por_hojas += int(prow['cantidad'] or 0) * min(h_tot, h_cort)
+                return max(pzas_direct, pzas_por_hojas), 'Corte'
+            else:
+                pzas_prev = av_map.get((of_n, p_no, p_prev), 0)
+                if pzas_prev > 0:
+                    return pzas_prev, p_prev
+                # Si es un proceso usualmente omitido o no registrado (Rebabeo, Barrenado),
+                # continuamos hacia el proceso anterior (Corte)
+                if p_prev in ['Rebabeo', 'Barrenado']:
+                    continue
+                else:
+                    return 0, p_prev
+
+        return 0, (procesos_previos[-1] if procesos_previos else "")
+
+    wip_list = []
+    origin_list = []
+    term_list = []
+    rech_list = []
+
+    for _, row in df_agrupado.iterrows():
+        of_n = str(row['of_number'])
+        p_no = str(row['no_pieza'])
+        w, orig = resolve_wip_and_origin(row)
+        wip_list.append(w)
+        origin_list.append(orig)
+        term_list.append(av_map.get((of_n, p_no, area_seleccionada), 0))
+        rech_list.append(rec_map.get((of_n, p_no, area_seleccionada), 0))
+
+    df_agrupado['wip'] = wip_list
+    df_agrupado['area_anterior'] = origin_list
+    df_agrupado['terminadas_ant'] = term_list
+    df_agrupado['rechazadas_ant'] = rech_list
+
+    df_agrupado['Pendiente Disponible'] = (df_agrupado['wip'] - df_agrupado['terminadas_ant'] - df_agrupado['rechazadas_ant']).clip(lower=0)
+    df_agrupado['Pendiente Total OF'] = (df_agrupado['total_requeridas'] - df_agrupado['terminadas_ant'] - df_agrupado['rechazadas_ant']).clip(lower=0)
+
+    return df_agrupado
+
 
 def get_kanban_production_data():
     """

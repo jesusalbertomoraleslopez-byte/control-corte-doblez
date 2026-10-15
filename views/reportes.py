@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from utils.database import get_connection, get_todas_piezas, get_nidos, get_all_ofs, get_local_today
+from utils.database import get_connection, get_todas_piezas, get_nidos, get_all_ofs, get_local_today, calculate_wip_dataframe
 from views.avances import PROCESSES
 
 def get_area_anterior(ruta_str, current_area):
@@ -79,57 +79,8 @@ def calculate_global_wip(of_number):
             continue
             
         # Post corte
-        df_piezas = df_todas.copy()
-        df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area in [p.strip() for p in str(x).split(',') if p.strip()])
-        df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
-        
-        if df_piezas.empty:
-            wip_por_area[area] = 0
-            continue
-            
-        df_piezas['area_anterior'] = df_piezas['ruta'].apply(lambda x: get_area_anterior(x, area))
-        df_agrupado = df_piezas.groupby(['of_number', 'no_pieza']).agg({
-            'total_requeridas': 'sum',
-            'area_anterior': 'first'
-        }).reset_index()
-        
-        def get_wip(row):
-            area_ant = row['area_anterior']
-            if pd.isna(area_ant) or not area_ant: return 0
-            mask = (
-                (df_avances_all['of_number'] == row['of_number']) &
-                (df_avances_all['no_pieza'] == row['no_pieza']) &
-                (df_avances_all['area'] == area_ant)
-            )
-            return int(df_avances_all[mask]['cantidad'].sum())
-            
-        def get_terminadas_ant(row):
-            mask = (
-                (df_avances_all['of_number'] == row['of_number']) &
-                (df_avances_all['no_pieza'] == row['no_pieza']) &
-                (df_avances_all['area'] == area)
-            )
-            return int(df_avances_all[mask]['cantidad'].sum())
-            
-        def get_rechazadas_ant(row):
-            mask = (
-                (df_rechazos_all['of_number'] == row['of_number']) &
-                (df_rechazos_all['no_pieza'] == row['no_pieza']) &
-                (df_rechazos_all['area'] == area)
-            )
-            return int(df_rechazos_all[mask]['cantidad'].sum())
-            
-        df_agrupado['wip'] = df_agrupado.apply(get_wip, axis=1)
-        df_agrupado['term'] = df_agrupado.apply(get_terminadas_ant, axis=1)
-        df_agrupado['rech'] = df_agrupado.apply(get_rechazadas_ant, axis=1)
-        
-        df_agrupado['pendiente_disp'] = df_agrupado['wip'] - df_agrupado['term'] - df_agrupado['rech']
-        df_agrupado['pendiente_disp'] = df_agrupado['pendiente_disp'].apply(lambda x: max(0, x))
-        
-        df_agrupado['pendiente_of'] = df_agrupado['total_requeridas'] - df_agrupado['term'] - df_agrupado['rech']
-        df_agrupado = df_agrupado[df_agrupado['pendiente_of'] > 0]
-        
-        wip_por_area[area] = int(df_agrupado['pendiente_disp'].sum())
+        df_agrup = calculate_wip_dataframe(df_todas, area, of_number)
+        wip_por_area[area] = int(df_agrup['Pendiente Disponible'].sum()) if not df_agrup.empty else 0
         
     return wip_por_area
 
@@ -225,36 +176,11 @@ def get_wip_pieces_detail(of_list, area):
         return df_merged[['OF', 'No. Pieza', 'Descripción', 'Cantidad WIP']].reset_index(drop=True)
 
     conn.close()
-    df_piezas = df_todas.copy()
-    df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(
-        lambda x: area in [p.strip() for p in str(x).split(',') if p.strip()]
-    )
-    df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
-    if df_piezas.empty:
+    df_agrupado = calculate_wip_dataframe(df_todas, area, of_number)
+    if df_agrupado.empty:
         return pd.DataFrame(columns=['OF', 'No. Pieza', 'Descripción', 'Cantidad WIP'])
 
-    df_piezas['area_anterior'] = df_piezas['ruta'].apply(lambda x: get_area_anterior(x, area))
-    df_agrupado = df_piezas.groupby(['of_number', 'no_pieza', 'nombre_pieza'], as_index=False).agg({
-        'total_requeridas': 'sum',
-        'area_anterior': 'first'
-    })
-
-    av_map = df_avances_all.set_index(['of_number', 'no_pieza', 'area'])['cantidad'].to_dict() if not df_avances_all.empty else {}
-    rec_map = df_rechazos_all.set_index(['of_number', 'no_pieza', 'area'])['cantidad'].to_dict() if not df_rechazos_all.empty else {}
-
-    df_agrupado['wip'] = [
-        int(av_map.get((r['of_number'], r['no_pieza'], r['area_anterior']), 0)) if pd.notna(r['area_anterior']) and r['area_anterior'] else 0
-        for _, r in df_agrupado.iterrows()
-    ]
-    df_agrupado['term'] = [
-        int(av_map.get((r['of_number'], r['no_pieza'], area), 0))
-        for _, r in df_agrupado.iterrows()
-    ]
-    df_agrupado['rech'] = [
-        int(rec_map.get((r['of_number'], r['no_pieza'], area), 0))
-        for _, r in df_agrupado.iterrows()
-    ]
-    df_agrupado['Cantidad WIP'] = (df_agrupado['wip'] - df_agrupado['term'] - df_agrupado['rech']).clip(lower=0).astype(int)
+    df_agrupado['Cantidad WIP'] = df_agrupado['Pendiente Disponible'].astype(int)
     df_res = df_agrupado[df_agrupado['Cantidad WIP'] > 0].rename(columns={
         'of_number': 'OF',
         'no_pieza': 'No. Pieza',
@@ -332,6 +258,8 @@ def calculate_wip_on_date(of_list, target_date_str):
             for _, r in df_agrupado.iterrows():
                 a_ant = r['area_anterior']
                 w_val = int(av_map.get((r['of_number'], r['no_pieza'], a_ant), 0)) if pd.notna(a_ant) and a_ant else 0
+                if w_val == 0 and a_ant in ['Rebabeo', 'Barrenado']:
+                    w_val = int(av_map.get((r['of_number'], r['no_pieza'], 'Corte'), 0))
                 t_val = int(av_map.get((r['of_number'], r['no_pieza'], area), 0))
                 r_val = int(rec_map.get((r['of_number'], r['no_pieza'], area), 0))
                 total_area += max(0, w_val - t_val - r_val)

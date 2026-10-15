@@ -158,6 +158,8 @@ def calculate_sku_wip_report(df_uploaded, of_list):
                         qty_in = sum(avances_of_map.get((of_n, sku, "Corte"), 0) for of_n in df_p_db["of_number"].unique())
                     else:
                         qty_in = sum(avances_of_map.get((of_n, sku, area_ant), 0) for of_n in df_p_db["of_number"].unique())
+                        if qty_in == 0 and area_ant in ["Rebabeo", "Barrenado"]:
+                            qty_in = sum(avances_of_map.get((of_n, sku, "Corte"), 0) for of_n in df_p_db["of_number"].unique())
                         
                     qty_out = sum(
                         avances_of_map.get((of_n, sku, area), 0) + rechazos_of_map.get((of_n, sku, area), 0)

@@ -7,7 +7,11 @@ import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-from utils.database import get_active_of, get_todas_piezas, get_avances_nido, save_avances_mixto, get_total_rechazos, get_connection, get_movimientos_area, get_all_ofs, get_personal_prenomina, get_operadores_por_area, get_local_now
+from utils.database import (
+    get_active_of, get_todas_piezas, get_avances_nido, save_avances_mixto, 
+    get_total_rechazos, get_connection, get_movimientos_area, get_all_ofs, 
+    get_personal_prenomina, get_operadores_por_area, get_local_now, calculate_wip_dataframe
+)
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode, JsCode
 
 # Constantes de diseño
@@ -1104,84 +1108,27 @@ def view_avances():
         st.markdown(f"### 📋 Números de Parte de la OF: **{of_number}**")
         st.markdown(f"👇 **Para {area_seleccionada}, registra las piezas que vayas terminando.**")
         
-        # 1. Filtrar piezas que SÍ pasan por esta área
-        df_piezas = df_todas.copy()
-        if 'hojas' not in df_piezas.columns:
-            df_piezas['hojas'] = 1
-        df_piezas['total_requeridas'] = df_piezas['cantidad'] * df_piezas['hojas']
+        df_agrupado = calculate_wip_dataframe(df_todas, area_seleccionada, of_number)
         
-        # Verificar si la pieza pasa por area_seleccionada y obtener su area anterior
-        def get_area_anterior(ruta_str, current_area):
-            procesos = [p.strip() for p in str(ruta_str).split(',') if p.strip()]
-            if current_area in procesos:
-                idx = procesos.index(current_area)
-                if idx > 0:
-                    return procesos[idx - 1]
-            return None
-            
-        df_piezas['pasa_por_aqui'] = df_piezas['ruta'].apply(lambda x: area_seleccionada in [p.strip() for p in str(x).split(',') if p.strip()])
-        df_piezas = df_piezas[df_piezas['pasa_por_aqui']]
-        
-        if df_piezas.empty:
+        if df_agrupado.empty:
             st.warning(f"⚠️ No hay piezas programadas para pasar por {area_seleccionada} en esta OF.")
             st.stop()
             
-        df_piezas['area_anterior'] = df_piezas['ruta'].apply(lambda x: get_area_anterior(x, area_seleccionada))
-        
-        # Agrupar por pieza (sumando total requeridas)
-        df_agrupado = df_piezas.groupby(['of_number', 'no_pieza']).agg({
-            'nombre_pieza': 'first',
-            'total_requeridas': 'sum',
-            'area_anterior': 'first' # Asumimos misma ruta para misma pieza
-        }).reset_index()
-        
-        # 2. Cargar todos los avances y rechazos de la OF de una sola vez
-        conn = get_connection()
-        if of_number == "Todas":
-            df_avances_all = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances GROUP BY of_number, no_pieza, area", conn)
-            df_rechazos_all = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos GROUP BY of_number, no_pieza, area", conn)
-        else:
-            df_avances_all = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM avances WHERE of_number=? GROUP BY of_number, no_pieza, area", conn, params=(of_number,))
-            df_rechazos_all = pd.read_sql_query("SELECT of_number, no_pieza, area, SUM(cantidad) as cantidad FROM rechazos WHERE of_number=? GROUP BY of_number, no_pieza, area", conn, params=(of_number,))
-        conn.close()
-        
-        # 3. Calcular métricas por pieza
-        def get_wip(row):
-            area_ant = row['area_anterior']
-            if pd.isna(area_ant) or not area_ant:
-                return 0 # Ej: Si es el primer proceso y no es corte
-            wip = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['of_number'] == row['of_number']) & (df_avances_all['area'] == area_ant)]['cantidad'].sum()
-            return int(wip)
-            
-        def get_terminadas_ant(row):
-            term = df_avances_all[(df_avances_all['no_pieza'] == row['no_pieza']) & (df_avances_all['of_number'] == row['of_number']) & (df_avances_all['area'] == area_seleccionada)]['cantidad'].sum()
-            return int(term)
-            
-        def get_rechazadas_ant(row):
-            rech = df_rechazos_all[(df_rechazos_all['no_pieza'] == row['no_pieza']) & (df_rechazos_all['of_number'] == row['of_number']) & (df_rechazos_all['area'] == area_seleccionada)]['cantidad'].sum()
-            return int(rech)
-            
-        df_agrupado['wip'] = df_agrupado.apply(get_wip, axis=1)
-        df_agrupado['terminadas_ant'] = df_agrupado.apply(get_terminadas_ant, axis=1)
-        df_agrupado['rechazadas_ant'] = df_agrupado.apply(get_rechazadas_ant, axis=1)
-        
         df_edit = df_agrupado.copy()
         
-        df_edit['Pendiente Disponible'] = df_edit['wip'] - df_edit['terminadas_ant'] - df_edit['rechazadas_ant']
-        df_edit['Pendiente Total OF'] = df_edit['total_requeridas'] - df_edit['terminadas_ant'] - df_edit['rechazadas_ant']
-        
-        # Evitar negativos
-        df_edit['Pendiente Disponible'] = df_edit['Pendiente Disponible'].apply(lambda x: max(0, x))
-        df_edit['Pendiente Total OF'] = df_edit['Pendiente Total OF'].apply(lambda x: max(0, x))
-        
-        # Filtrar solo las que tienen Pendiente Total y además tienen WIP Disponible o avance en esta área
+        # Filtrar solo las que tienen Pendiente Total y además tienen WIP Disponible o avance previo en esta área
         mask_pendiente = df_edit['Pendiente Total OF'] > 0
         mask_wip = (df_edit['Pendiente Disponible'] > 0) | (df_edit['terminadas_ant'] > 0) | (df_edit['rechazadas_ant'] > 0)
-        df_edit = df_edit[mask_pendiente & mask_wip].copy()
+        df_edit_disp = df_edit[mask_pendiente & mask_wip].copy()
         
-        if df_edit.empty:
-            st.success(f"✅ ¡Todas las piezas de la OF ya fueron procesadas en {area_seleccionada}!")
+        if df_edit_disp.empty:
+            total_pend_of = df_edit['Pendiente Total OF'].sum()
+            if total_pend_of > 0:
+                st.warning(f"⏳ **No hay piezas disponibles en WIP para {area_seleccionada} en este momento.**\n\nHay **{int(total_pend_of)} piezas** programadas para esta área en la OF, pero aún se encuentran en proceso previo (Corte / Rebabeo).")
+            else:
+                st.success(f"✅ ¡Todas las piezas de la OF ya fueron procesadas en {area_seleccionada}!")
         else:
+            df_edit = df_edit_disp
             df_edit['Terminadas'] = 0
             df_edit['Rechazos'] = 0
             df_edit['Motivo'] = ""
