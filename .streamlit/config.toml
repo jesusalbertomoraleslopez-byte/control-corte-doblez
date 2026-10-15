@@ -1,0 +1,19 @@
+[theme]
+primaryColor = "#EC2024"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8FAFC"
+textColor = "#111111"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+enableWebsocketCompression = true
+fileWatcherType = "none"
+runOnSave = false
+maxUploadSize = 100
+maxMessageSize = 100
