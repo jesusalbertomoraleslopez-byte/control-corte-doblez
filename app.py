@@ -124,7 +124,72 @@ def inject_css():
     css = _read_css()
     if css:
         st.markdown(f'<style>{css}</style>', unsafe_allow_html=True)
-            
+    st.markdown("""<style>
+    /* Menú Lateral Estilo Google Workspace (Píldoras Material Design 3) */
+    [data-testid="stSidebar"] div[role="radiogroup"] > label > div:first-child {
+        display: none !important;
+    }
+    [data-testid="stSidebar"] div[role="radiogroup"] {
+        background-color: transparent !important;
+        border: none !important;
+        padding: 0 !important;
+        gap: 3px !important;
+        display: flex !important;
+        flex-direction: column !important;
+    }
+    [data-testid="stSidebar"] div[role="radiogroup"] > label {
+        background-color: transparent !important;
+        border: 1px solid transparent !important;
+        color: #CBD5E1 !important;
+        padding: 9px 18px !important;
+        border-radius: 24px !important;
+        transition: all 0.18s ease-in-out !important;
+        margin: 1px 0 !important;
+        cursor: pointer !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+    [data-testid="stSidebar"] div[role="radiogroup"] label p,
+    [data-testid="stSidebar"] div[role="radiogroup"] label span {
+        font-size: 15px !important;
+        font-family: 'Questrial', sans-serif !important;
+        font-weight: 500 !important;
+        color: #CBD5E1 !important;
+        line-height: 1.35 !important;
+    }
+    [data-testid="stSidebar"] div[role="radiogroup"] > label:hover,
+    [data-testid="stSidebar"] div[role="radiogroup"] > label:hover p,
+    [data-testid="stSidebar"] div[role="radiogroup"] > label:hover span {
+        background-color: rgba(255, 255, 255, 0.08) !important;
+        border-color: transparent !important;
+        color: #FFFFFF !important;
+        border-radius: 24px !important;
+    }
+    [data-testid="stSidebar"] div[role="radiogroup"] > label[data-checked="true"],
+    [data-testid="stSidebar"] div[role="radiogroup"] > label[data-checked="true"] p,
+    [data-testid="stSidebar"] div[role="radiogroup"] > label[data-checked="true"] span,
+    [data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked),
+    [data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) p,
+    [data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) span {
+        background-color: rgba(236, 32, 36, 0.22) !important;
+        border: 1px solid rgba(236, 32, 36, 0.55) !important;
+        color: #FFFFFF !important;
+        font-weight: 700 !important;
+        border-radius: 24px !important;
+    }
+
+    /* Botón Google Workspace 'Redactar / Nuevo' (FAB Pill) */
+    div.stButton > button[key="btn_google_fab_corte"] {
+        border-radius: 20px !important;
+        padding: 10px 20px !important;
+        font-size: 14.5px !important;
+        font-weight: 700 !important;
+        box-shadow: 0 4px 14px rgba(236, 32, 36, 0.35) !important;
+        border: 1px solid rgba(236, 32, 36, 0.8) !important;
+        margin-bottom: 8px !important;
+    }
+    </style>""", unsafe_allow_html=True)
+
 inject_css()
 
 
@@ -256,50 +321,60 @@ def render_sidebar():
     """
     st.sidebar.markdown(header_badge, unsafe_allow_html=True)
     
-    # Definición del menú con iconos grandes y texto claro
-    MENU_ITEMS = [
-        {"key": "dashboard",       "icon": "📊", "label": "Panel de Control",            "admin_only": False},
-        {"key": "supervision_gcs", "icon": "🛰️", "label": "Supervisión Repositorio OF", "admin_only": False},
-        {"key": "kanban",          "icon": "🗂️", "label": "Tablero Kanban",             "admin_only": False},
-        {"key": "produccion",      "icon": "⚙️", "label": "Control de Producción",      "admin_only": False},
-        {"key": "consultas",       "icon": "📋", "label": "Consultas y Reportes",       "admin_only": False},
-        {"key": "etiquetas",       "icon": "🏷️", "label": "Supervisión Etiquetas OF",   "admin_only": False},
-        {"key": "global",          "icon": "🌐", "label": "Monitoreo Global",            "admin_only": False},
-        {"key": "manufactura",     "icon": "🤖", "label": "Manufactura Inteligente",    "admin_only": False},
-        None,  # separador
-        {"key": "mantenimiento",   "icon": "🛠️", "label": "Mantenimiento / Admin",       "admin_only": True},
-        {"key": "sgc",             "icon": "📂", "label": "Documentos SGC",              "admin_only": True},
-    ]
+    # --- NAVEGACIÓN ESTILO GOOGLE WORKSPACE ---
+    if st.sidebar.button("➕ Nueva Orden", key="btn_google_fab_corte", use_container_width=True, type="primary"):
+        st.session_state.nav_choice = "produccion"
+        st.session_state["corte_google_label"] = "⚙️ Producción"
+        st.rerun()
+
+    st.sidebar.markdown("<p style='font-family: \"Montserrat\", sans-serif; font-size: 11px; font-weight: 700; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 10px; margin-bottom: 6px;'>Menú Principal:</p>", unsafe_allow_html=True)
 
     is_admin = str(st.session_state.role).lower() in ["administrador", "admin"]
 
-    # Inicializar selección activa
+    CORTE_MENU_MAP = {
+        "📊 Resumen": "dashboard",
+        "🗂️ Kanban": "kanban",
+        "⚙️ Producción": "produccion",
+        "🛰️ Repositorio": "supervision_gcs",
+        "📋 Reportes": "consultas",
+        "🏷️ Etiquetas": "etiquetas",
+        "🌐 Monitoreo": "global",
+        "🤖 Manufactura": "manufactura",
+        "🛠️ Ajustes": "mantenimiento",
+        "📂 Documentos": "sgc",
+    }
+    CORTE_KEY_TO_LABEL = {v: k for k, v in CORTE_MENU_MAP.items()}
+
+    google_corte_items = [
+        "📊 Resumen",
+        "🗂️ Kanban",
+        "⚙️ Producción",
+        "🛰️ Repositorio",
+        "📋 Reportes",
+        "🏷️ Etiquetas",
+        "🌐 Monitoreo",
+        "🤖 Manufactura",
+    ]
+    if is_admin:
+        google_corte_items.extend(["🛠️ Ajustes", "📂 Documentos"])
+
     if "nav_choice" not in st.session_state:
         st.session_state.nav_choice = "dashboard"
 
-    current = st.session_state.nav_choice
+    curr_key = st.session_state.nav_choice
+    curr_label = CORTE_KEY_TO_LABEL.get(curr_key, "📊 Resumen")
+    if curr_label not in google_corte_items:
+        curr_label = google_corte_items[0]
+    idx_corte = google_corte_items.index(curr_label)
 
-    for item in MENU_ITEMS:
-        if item is None:
-            st.sidebar.markdown('<hr style="border:none;border-top:1px solid #2e3038;margin:4px 0;">', unsafe_allow_html=True)
-            continue
-        if item["admin_only"] and not is_admin:
-            continue
-        is_active = current == item["key"]
-        
-        btn_key = f"nav_btn_{item['key']}"
-        btn_type = "primary" if is_active else "secondary"
-        if st.sidebar.button(
-            item["label"],
-            icon=item["icon"],
-            key=btn_key,
-            use_container_width=True,
-            type=btn_type,
-            help=item["label"]
-        ):
-            st.session_state.nav_choice = item["key"]
-            st.rerun()
-
+    sel_label = st.sidebar.radio(
+        "Navegación:",
+        options=google_corte_items,
+        index=idx_corte,
+        key="radio_corte_google",
+        label_visibility="collapsed"
+    )
+    st.session_state.nav_choice = CORTE_MENU_MAP.get(sel_label, "dashboard")
     choice = st.session_state.nav_choice
     
     # Determinar la OF Activa en segundo plano
