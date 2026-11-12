@@ -1295,6 +1295,9 @@ def marcar_avance_completo_area(of_number: str, area: str, operador: str = "Kanb
                         (of_number, nido_id, no_pieza, area, faltante, operador, maquina, None, now)
                     )
 
+        if area == "Liberado":
+            c.execute("UPDATE ordenes SET gantt_avance = 'LIBERADA' WHERE of_number = ?", (of_number,))
+
         conn.commit()
         save_db_to_excel(conn)
         conn.close()
@@ -1477,7 +1480,7 @@ def get_kanban_production_data():
     c = conn.cursor()
 
     c.execute("""
-        SELECT of_number, fecha, po, proyecto, proyecto_cliente, prioridad, etiqueta_proyecto 
+        SELECT of_number, fecha, po, proyecto, proyecto_cliente, prioridad, etiqueta_proyecto, gantt_avance 
         FROM ordenes 
         ORDER BY of_number DESC
     """)
@@ -1548,7 +1551,7 @@ def get_kanban_production_data():
         cliente = str(row[4] or "")
         prioridad = str(row[5] or "Media").strip().capitalize()
         etiqueta = str(row[6] or "").strip()
-        estado_db = ""
+        estado_db = str(row[7] or "").strip()
 
         ndata = nidos_dict.get(of_num, {"total_nidos": 0, "total_hojas": 0})
         total_nidos = ndata["total_nidos"]
@@ -1570,7 +1573,10 @@ def get_kanban_production_data():
         pzs_liberado = avances_areas_dict.get((of_num, 'Liberado'), 0)
         pct_liberado = (pzs_liberado / total_piezas * 100) if total_piezas > 0 else 0.0
 
-        if pct_liberado >= 100.0 or estado_db.lower() in ["terminada", "liberada"]:
+        if pct_liberado >= 100.0 or estado_db.lower() in ["terminada", "liberada", "completado", "completada"]:
+            stage = "liberado"
+        elif total_nidos == 0 and total_piezas == 0:
+            # OF sin nidos ni piezas (ej. transferida o vacía): marcar como liberada
             stage = "liberado"
         elif pct_pintura >= 100.0:
             stage = "liberado"
