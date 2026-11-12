@@ -120,6 +120,19 @@ def _get_logo_b64_tag():
     </div>
     """
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _get_banner_b64_tag():
+    import base64
+    banner_path = os.path.join(os.path.dirname(__file__), "assets", "banner.png")
+    if os.path.exists(banner_path):
+        try:
+            with open(banner_path, "rb") as _bf:
+                _b64 = base64.b64encode(_bf.read()).decode("utf-8")
+            return f'<img src="data:image/png;base64,{_b64}" style="width:100%; height:auto; border-radius:8px; margin-bottom:14px; display:block;" alt="SIGRAMA" />'
+        except Exception:
+            pass
+    return ""
+
 def inject_css():
     css = _read_css()
     if css:
@@ -533,12 +546,10 @@ def main():
     else:
         choice = render_sidebar()
         
-        # Banner Corporativo basado en Manual de Identidad
-        banner_path = Path(__file__).resolve().parent / "assets" / "banner.png"
-        
-        # Fin de configuracion lateral (se elimino la opcion de personalizar recursos)
-        if banner_path.exists():
-            st.image(str(banner_path), use_container_width=True)
+        # Banner Corporativo basado en Manual de Identidad (base64 inline, inmune a 404 /media en Cloud Run)
+        _banner_tag = _get_banner_b64_tag()
+        if _banner_tag:
+            st.markdown(_banner_tag, unsafe_allow_html=True)
         else:
             banner_html = """
 <div style="background: linear-gradient(135deg, #000000 0%, #222222 100%); 

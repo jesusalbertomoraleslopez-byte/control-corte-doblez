@@ -37,6 +37,7 @@ call gcloud run deploy sigrama-corte-doblez ^
     --region us-central1 ^
     --platform managed ^
     --allow-unauthenticated ^
+    --session-affinity ^
     --memory 2Gi ^
     --cpu 2 ^
     --set-env-vars GCS_BUCKET=sigrama-corte-doblez-storage,PYTHONUNBUFFERED=1

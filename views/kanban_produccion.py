@@ -10,7 +10,6 @@ import re
 from pathlib import Path
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 from utils.database import (
     get_kanban_production_data,
@@ -21,7 +20,394 @@ from utils.database import (
 )
 
 KANBAN_COMPONENT_PATH = Path(__file__).resolve().parent.parent / "components" / "odoo_kanban"
-_odoo_kanban_comp = components.declare_component("odoo_kanban_v2", path=str(KANBAN_COMPONENT_PATH))
+
+
+@st.cache_resource
+def _get_odoo_kanban_v2():
+    """Registra el tablero Kanban con st.components.v2 (inline por WebSocket, inmune a 404 en Cloud Run)."""
+    css_raw = (KANBAN_COMPONENT_PATH / "css" / "odoo_theme.css").read_text(encoding="utf-8")
+    css_v2 = (
+        css_raw
+        .replace(":root {", ":host {")
+        .replace("body {", ".kanban-root {")
+        .replace("height: 100vh;", "height: 650px;")
+    )
+
+    sortable_js = (KANBAN_COMPONENT_PATH / "js" / "sortable.min.js").read_text(encoding="utf-8")
+
+    html_v2 = """
+    <div class="kanban-root">
+        <div class="kanban-top-nav-bar" id="kanbanTopNavBar">
+            <div class="nav-scroll-group">
+                <button class="nav-scroll-btn" id="btnScrollLeft" title="Desplazar a la izquierda (fases previas)">◀</button>
+                <button class="nav-scroll-btn" id="btnToggleCompact" title="Alternar entre ancho compacto o estándar">📐 Compacto</button>
+                <div class="nav-stage-chips" id="navStageChips"></div>
+                <button class="nav-scroll-btn" id="btnScrollRight" title="Desplazar a la derecha (fases siguientes)">▶</button>
+            </div>
+            <div class="nav-info-group">
+                <span class="nav-scroll-hint">💡 Clic en cualquier fase para saltar directo a ella</span>
+            </div>
+        </div>
+        <div class="kanban-layout-wrapper" id="kanbanLayoutWrapper">
+            <div class="kanban-scroll-wrapper" id="kanbanScrollWrapper">
+                <div class="kanban-board-container" id="kanbanBoard"></div>
+            </div>
+            <div class="kanban-fixed-dock" id="kanbanFixedDock"></div>
+        </div>
+    </div>
+    """
+
+    kanban_js = """
+    export default function(component) {
+        const { data, setTriggerValue, parentElement } = component;
+        const columns = (data && data.columns) ? data.columns : [];
+        const totalCount = (data && data.total_count) ? data.total_count : 0;
+        const SortableLib = window.Sortable;
+        let sortableInstances = [];
+
+        function sendValueToStreamlit(value) {
+            setTriggerValue("kanban_event", value);
+        }
+
+        function openExpedienteModal(reqId) {
+            sendValueToStreamlit({
+                action: "open_modal",
+                event_id: Date.now() + "_" + Math.random().toString(36).substring(2, 9),
+                req_id: reqId
+            });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement("div");
+            div.innerText = text == null ? "" : String(text);
+            return div.innerHTML;
+        }
+
+        function toggleFoldStage(stageId, event) {
+            if (event) event.stopPropagation();
+            const colEl = parentElement.querySelector(`.kanban-column[data-stage-id="${stageId}"]`);
+            if (!colEl) return;
+
+            const isNowFolded = colEl.classList.toggle("folded");
+            const btn = colEl.querySelector(".column-fold-btn");
+            if (btn) {
+                btn.textContent = isNowFolded ? "▶" : "◀";
+                btn.title = isNowFolded ? "Expandir columna" : "Contraer columna";
+            }
+
+            try {
+                let stored = JSON.parse(localStorage.getItem("sigrama_folded_stages") || "[]");
+                if (!Array.isArray(stored)) stored = [];
+                if (isNowFolded) {
+                    if (!stored.includes(stageId)) stored.push(stageId);
+                } else {
+                    stored = stored.filter(id => id !== stageId);
+                }
+                localStorage.setItem("sigrama_folded_stages", JSON.stringify(stored));
+            } catch (err) {}
+        }
+
+        function setupSortableOnDropzone(dropzoneEl) {
+            if (!SortableLib || !dropzoneEl) return;
+            const sortable = new SortableLib(dropzoneEl, {
+                group: "odoo_kanban_group",
+                animation: 180,
+                ghostClass: "sortable-ghost",
+                chosenClass: "sortable-chosen",
+                dragClass: "sortable-drag",
+                fallbackTolerance: 3,
+                scroll: true,
+                scrollSensitivity: 80,
+                scrollSpeed: 15,
+                bubbleScroll: true,
+                onEnd: function (evt) {
+                    const itemEl = evt.item;
+                    const fromColId = evt.from.dataset.stageId;
+                    const toColId = evt.to.dataset.stageId;
+                    const reqId = itemEl.dataset.reqId;
+                    const newDbStatus = evt.to.dataset.dbStatus;
+                    if (fromColId !== toColId) {
+                        sendValueToStreamlit({
+                            action: "move_stage",
+                            event_id: Date.now() + "_" + Math.random().toString(36).substring(2, 9),
+                            req_id: reqId,
+                            old_stage: fromColId,
+                            new_stage: toColId,
+                            new_db_status: newDbStatus
+                        });
+                    }
+                }
+            });
+            sortableInstances.push(sortable);
+        }
+
+        function createCardElement(card) {
+            const cardEl = document.createElement("div");
+            cardEl.className = "postit-card";
+            cardEl.dataset.reqId = card.id;
+            cardEl.style.backgroundColor = card.bg_color || "#FEF08A";
+            cardEl.style.borderColor = card.border_color || "#FDE047";
+            cardEl.style.borderTopColor = card.top_color || "#CA8A04";
+
+            const formattedMonto = card.moneda === 'Pzs'
+                ? `${(card.monto || 0).toLocaleString('es-MX')} Pzs`
+                : new Intl.NumberFormat('es-MX', { style: 'currency', currency: card.moneda || 'MXN' }).format(card.monto || 0);
+
+            const poTag = card.folio_po ? `<span class="card-po-badge">📦 ${escapeHtml(card.folio_po)}</span>` : "";
+            const solTag = card.folio_solicitud ? `<span class="card-sol-tag">${escapeHtml(card.folio_solicitud)}</span>` : "";
+            const priorityStars = (card.prioridad === "Urgente" || card.prioridad === "Alta")
+                ? "⭐⭐⭐"
+                : (card.prioridad === "Media" ? "⭐⭐☆" : "⭐☆☆");
+            const metaRight = card.moneda === 'Pzs'
+                ? `📑 ${card.num_nidos || card.num_cotizaciones || 0} nidos`
+                : `📑 ${card.num_cotizaciones || 0} cotiz.`;
+            const btnLabel = card.moneda === 'Pzs' ? '🔍 Ver Detalle OF' : '👁️ Abrir Expediente';
+
+            cardEl.innerHTML = `
+                <div>
+                    <div class="card-header">
+                        <span class="card-folio">📌 ${escapeHtml(card.id)}</span>
+                        ${solTag}
+                    </div>
+                    <div class="card-title">${card.descripcion || "Sin descripción"}</div>
+                </div>
+                <div>
+                    <div class="card-amount-row">
+                        <span class="card-amount">⚙️ ${formattedMonto}</span>
+                        ${poTag}
+                    </div>
+                    <div class="card-user-row">
+                        <span style="background-color:${card.avatar_bg || '#6366F1'}; color:#FFFFFF; width:18px; height:18px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:9px; font-weight:800;">
+                            ${escapeHtml(card.initials || 'SG')}
+                        </span>
+                        <span><strong>${escapeHtml(card.solicitante || 'Sin asignar')}</strong> ${card.area ? `&bull; 📍 ${escapeHtml(card.area)}` : ''}</span>
+                    </div>
+                    <div class="card-footer-meta">
+                        <span>${priorityStars} ${escapeHtml(card.prioridad || '')}</span>
+                        <span style="font-weight:700;">${metaRight}</span>
+                    </div>
+                    <button class="card-open-btn" type="button">${btnLabel}</button>
+                </div>
+            `;
+
+            const openBtn = cardEl.querySelector(".card-open-btn");
+            if (openBtn) {
+                openBtn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    openExpedienteModal(card.id);
+                });
+            }
+            cardEl.addEventListener("dblclick", (e) => {
+                e.stopPropagation();
+                openExpedienteModal(card.id);
+            });
+            return cardEl;
+        }
+
+        function renderKanbanBoard() {
+            const boardContainer = parentElement.getElementById("kanbanBoard");
+            const fixedDockContainer = parentElement.getElementById("kanbanFixedDock");
+            if (!boardContainer) return;
+
+            sortableInstances.forEach(inst => { try { inst.destroy(); } catch (e) {} });
+            sortableInstances = [];
+            boardContainer.innerHTML = "";
+            if (fixedDockContainer) fixedDockContainer.innerHTML = "";
+
+            try {
+                if (localStorage.getItem("sigrama_kanban_compact") === "true") {
+                    boardContainer.classList.add("compact-mode");
+                }
+            } catch (e) {}
+
+            let foldedStages = [];
+            try {
+                foldedStages = JSON.parse(localStorage.getItem("sigrama_folded_stages") || "[]");
+                if (!Array.isArray(foldedStages)) foldedStages = [];
+            } catch (e) {}
+
+            const activeColumns = columns.filter(col => col.db_status !== "liberado");
+            const finishedColumn = columns.find(col => col.db_status === "liberado");
+
+            activeColumns.forEach(col => {
+                const isFolded = foldedStages.includes(col.id);
+                const columnEl = document.createElement("div");
+                columnEl.className = `kanban-column ${isFolded ? "folded" : ""}`;
+                columnEl.dataset.stageId = col.id;
+                const formattedTotal = `${(col.total_monto || 0).toLocaleString('es-MX')} Pzs`;
+
+                columnEl.innerHTML = `
+                    <div class="column-header">
+                        <div class="column-top-bar" style="background-color: ${col.color};"></div>
+                        <div class="column-title-row">
+                            <span class="column-title">
+                                <span class="column-icon-badge" style="background-color: ${col.color}; color: #FFFFFF;">${col.icon}</span>
+                                <span class="column-title-text">${escapeHtml(col.short_title)}</span>
+                            </span>
+                            <div class="column-actions">
+                                <span class="column-badge" id="badge-${col.id}">${col.cards.length}</span>
+                                <button class="column-fold-btn" type="button" title="${isFolded ? 'Expandir columna' : 'Contraer columna'}">${isFolded ? '▶' : '◀'}</button>
+                            </div>
+                        </div>
+                        <div class="column-metrics-row">
+                            <span>En Proceso:</span>
+                            <span class="column-total">${formattedTotal}</span>
+                        </div>
+                        <div class="column-progress-bar">
+                            <div class="column-progress-fill" style="width: ${Math.min(100, (col.cards.length / Math.max(1, totalCount)) * 100)}%; background-color: ${col.color};"></div>
+                        </div>
+                    </div>
+                    <div class="kanban-cards-dropzone" id="dropzone-${col.id}" data-stage-id="${col.id}" data-db-status="${col.db_status}"></div>
+                `;
+
+                const foldBtn = columnEl.querySelector(".column-fold-btn");
+                if (foldBtn) {
+                    foldBtn.addEventListener("click", (e) => toggleFoldStage(col.id, e));
+                }
+                columnEl.addEventListener("click", (e) => {
+                    if (columnEl.classList.contains("folded")) {
+                        toggleFoldStage(col.id, e);
+                    }
+                });
+
+                const dropzoneEl = columnEl.querySelector(".kanban-cards-dropzone");
+                col.cards.forEach(card => dropzoneEl.appendChild(createCardElement(card)));
+                boardContainer.appendChild(columnEl);
+                setupSortableOnDropzone(dropzoneEl);
+            });
+
+            if (finishedColumn && fixedDockContainer) {
+                const formattedTotalFinished = `${(finishedColumn.total_monto || 0).toLocaleString('es-MX')} Pzs`;
+                fixedDockContainer.innerHTML = `
+                    <div class="fixed-dock-banner">
+                        <span>🎯 Arrastra aquí para Terminar OF</span>
+                    </div>
+                    <div class="column-header">
+                        <div class="column-top-bar" style="background-color: #16A34A;"></div>
+                        <div class="column-title-row">
+                            <span class="column-title">
+                                <span class="column-icon-badge" style="background-color: #16A34A; color: #FFFFFF;">${finishedColumn.icon}</span>
+                                <span class="column-title-text" style="color: #14532D !important;">${escapeHtml(finishedColumn.short_title)}</span>
+                            </span>
+                            <div class="column-actions">
+                                <span class="column-badge" style="background-color: #16A34A; border-color: #16A34A;" id="badge-${finishedColumn.id}">${finishedColumn.cards.length}</span>
+                            </div>
+                        </div>
+                        <div class="column-metrics-row">
+                            <span>Total Liberadas:</span>
+                            <span class="column-total" style="color: #16A34A !important;">${formattedTotalFinished}</span>
+                        </div>
+                        <div class="column-progress-bar">
+                            <div class="column-progress-fill" style="width: 100%; background-color: #16A34A;"></div>
+                        </div>
+                    </div>
+                    <div class="kanban-cards-dropzone" id="dropzone-${finishedColumn.id}" data-stage-id="${finishedColumn.id}" data-db-status="${finishedColumn.db_status}"></div>
+                `;
+
+                const finishedDropzoneEl = fixedDockContainer.querySelector(".kanban-cards-dropzone");
+                finishedColumn.cards.forEach(card => finishedDropzoneEl.appendChild(createCardElement(card)));
+                setupSortableOnDropzone(finishedDropzoneEl);
+            }
+        }
+
+        function updateTopNavStageChips() {
+            const chipsContainer = parentElement.getElementById("navStageChips");
+            if (!chipsContainer) return;
+            chipsContainer.innerHTML = "";
+
+            columns.forEach(col => {
+                const isLiberado = col.db_status === "liberado";
+                const chip = document.createElement("button");
+                chip.type = "button";
+                chip.className = `nav-stage-chip ${isLiberado ? "chip-terminal" : ""}`;
+                chip.innerHTML = `<span>${col.icon}</span> <span>${escapeHtml(col.short_title)}</span> <strong style="background:${isLiberado ? '#DCFCE7' : '#E2E8F0'}; padding:1px 5px; border-radius:10px; font-size:9.5px; color:${isLiberado ? '#166534' : '#1E293B'};">${col.cards.length}</strong>`;
+                chip.title = isLiberado ? "Ver ventana fija de Terminadas / Liberado" : `Saltar directamente a la columna ${col.short_title}`;
+                chip.onclick = (e) => {
+                    e.preventDefault();
+                    if (isLiberado) {
+                        const dockEl = parentElement.getElementById("kanbanFixedDock");
+                        if (dockEl) dockEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                    } else {
+                        const colEl = parentElement.querySelector(`.kanban-column[data-stage-id="${col.id}"]`);
+                        if (colEl) colEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                    }
+                };
+                chipsContainer.appendChild(chip);
+            });
+        }
+
+        function setupScrollControls() {
+            const btnLeft = parentElement.getElementById("btnScrollLeft");
+            const btnRight = parentElement.getElementById("btnScrollRight");
+            const btnCompact = parentElement.getElementById("btnToggleCompact");
+            const wrapper = parentElement.getElementById("kanbanScrollWrapper");
+            const boardEl = parentElement.getElementById("kanbanBoard");
+            if (!wrapper) return;
+
+            if (btnLeft) {
+                btnLeft.onclick = (e) => {
+                    e.preventDefault();
+                    wrapper.scrollBy({ left: -320, behavior: 'smooth' });
+                };
+            }
+            if (btnRight) {
+                btnRight.onclick = (e) => {
+                    e.preventDefault();
+                    wrapper.scrollBy({ left: 320, behavior: 'smooth' });
+                };
+            }
+            if (btnCompact && boardEl) {
+                try {
+                    const isCompact = localStorage.getItem("sigrama_kanban_compact") === "true";
+                    if (isCompact) {
+                        boardEl.classList.add("compact-mode");
+                        btnCompact.textContent = "📐 Estándar";
+                        btnCompact.title = "Volver al ancho estándar de 280px";
+                    }
+                } catch (e) {}
+                btnCompact.onclick = (e) => {
+                    e.preventDefault();
+                    const nowCompact = boardEl.classList.toggle("compact-mode");
+                    btnCompact.textContent = nowCompact ? "📐 Estándar" : "📐 Compacto";
+                    btnCompact.title = nowCompact ? "Volver al ancho estándar de 280px" : "Alternar ancho compacto para ver todas las columnas";
+                    try { localStorage.setItem("sigrama_kanban_compact", nowCompact ? "true" : "false"); } catch (err) {}
+                };
+            }
+
+            wrapper.onwheel = (e) => {
+                const dropzone = e.target.closest('.kanban-cards-dropzone');
+                if (dropzone) {
+                    const atTop = dropzone.scrollTop <= 0 && e.deltaY < 0;
+                    const atBottom = (dropzone.scrollTop + dropzone.clientHeight >= dropzone.scrollHeight - 2) && e.deltaY > 0;
+                    if (atTop || atBottom || e.shiftKey) {
+                        wrapper.scrollLeft += e.deltaY;
+                    }
+                } else {
+                    wrapper.scrollLeft += (e.deltaY || e.deltaX);
+                }
+            };
+        }
+
+        renderKanbanBoard();
+        updateTopNavStageChips();
+        setupScrollControls();
+
+        return () => {
+            sortableInstances.forEach(inst => { try { inst.destroy(); } catch (e) {} });
+            sortableInstances = [];
+        };
+    }
+    """
+
+    full_js = f"if (!window.Sortable) {{\n{sortable_js}\n}}\n{kanban_js}"
+
+    return st.components.v2.component(
+        "odoo_kanban_v2",
+        html=html_v2,
+        css=css_v2,
+        js=full_js,
+        isolate_styles=True,
+    )
 
 # Configuración oficial de las 7 etapas de producción en planta
 KANBAN_STAGES = [
@@ -177,12 +563,12 @@ def view_kanban_produccion():
     st.markdown('''
     <div style="background: linear-gradient(135deg, #1e1e1e 0%, #111111 100%); 
                 padding: 18px 24px; border-radius: 10px; border-left: 5px solid #EC2024; margin-bottom: 20px;">
-        <div style="font-family: 'Montserrat', sans-serif; color: #FFFFFF !important; margin: 0; font-size: 24px; font-weight: 700;">
+        <span style="font-family: 'Montserrat', sans-serif; color: #FFFFFF !important; margin: 0; font-size: 24px; font-weight: 700; display: block;">
             🗂️ Tablero Kanban Interactivo de Producción
-        </div>
-        <p style="font-family: 'Questrial', sans-serif; color: #bbb; margin: 5px 0 0 0; font-size: 14px;">
+        </span>
+        <span style="font-family: 'Questrial', sans-serif; color: #E2E8F0 !important; margin: 5px 0 0 0; font-size: 14px; display: block;">
             Flujo de valor continuo estilo Odoo: Arrastre tarjetas para dar avance completo automático por área (Corte ➔ WIP Doblez ➔ Doblez ➔ WIP Pintura ➔ Pintura ➔ Liberado).
-        </p>
+        </span>
     </div>
     ''', unsafe_allow_html=True)
 
@@ -303,13 +689,17 @@ def view_kanban_produccion():
     </div>
     """, unsafe_allow_html=True)
 
-    # 4. Renderizar componente SortableJS
-    kanban_event = _odoo_kanban_comp(
-        columns=kanban_columns_payload,
-        total_count=len(ofs_filtradas),
+    # 4. Renderizar componente SortableJS mediante st.components.v2 (inmune a 404 en Cloud Run)
+    _odoo_kanban_comp = _get_odoo_kanban_v2()
+    _comp_res = _odoo_kanban_comp(
+        data={
+            "columns": kanban_columns_payload,
+            "total_count": len(ofs_filtradas),
+        },
         key="odoo_kanban_corte_doblez",
-        default=None
+        on_kanban_event_change=lambda: None,
     )
+    kanban_event = getattr(_comp_res, "kanban_event", None)
 
     # 5. Captura y ejecución de eventos interactivos
     if kanban_event and isinstance(kanban_event, dict):
